@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { paraglideMiddleware } from '$lib/paraglide/server';
-import { pb } from '$lib/server/pocketbase';
+import { pb as basePb } from '$lib/server/pocketbase';
 
 const handleParaglide: Handle = ({ event, resolve }) =>
 	paraglideMiddleware(event.request, ({ request, locale }) => {
@@ -12,11 +12,9 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 	});
 
 const handlePocketBase: Handle = async ({ event, resolve }) => {
+	const pb = basePb;
 	event.locals.pb = pb;
-
-	const response = await resolve(event);
-
-	return response;
+	return resolve(event);
 };
 
 export const handle: Handle = async ({ event, resolve }) => {

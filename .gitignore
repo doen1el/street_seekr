@@ -30,3 +30,6 @@ src/lib/paraglide
 
 # Svelte
 .svelte-kit
+
+# Pocketbase
+pb_data
