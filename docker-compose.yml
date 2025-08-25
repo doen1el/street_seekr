@@ -1,0 +1,40 @@
+services:
+  pocketbase:
+    image: nxtgencat/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    ports:
+      - '8090:8090' # change 8090 to the port you want to use
+    command: ['serve', '--http=0.0.0.0:8090', '--auto-migrate'] # change 8090 to the port you want to use
+    volumes:
+      - pb_data:/pb_data
+      - ./database/pb_migrations:/pb_migrations:ro
+      - ./database/pb_public:/pb_public
+      - ./database/pb_hooks:/pb_hooks:ro
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health'] # change 8090 to the port you want to use
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  web:
+    container_name: street_seekr
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PUBLIC_POCKETBASE_URL: http://localhost:8090 # change 8090 to the port you want to use
+        POCKETBASE_URL: http://pocketbase:8090 # change 8090 to the port you want to use
+    environment:
+      ORIGIN: http://localhost:5173 # change this to your domain in production
+      POCKETBASE_URL: http://pocketbase:8090 # change 8090 to the port you want to use
+      MAPILLARY_ACCESS_TOKEN: 'TOKEN' # change this to your own token
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    ports:
+      - '5173:3000' # change 5173 to the port you want to use
+
+volumes:
+  pb_data:
