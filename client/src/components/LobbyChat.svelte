@@ -9,11 +9,27 @@
 
 	let newMessage = '';
 	let chatContainer: HTMLDivElement;
+	let sending = false;
+	let showSendingSpinner = false;
+	let sendingSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function handleSubmit() {
-		if (newMessage.trim() === '') return;
-		await onSendMessage(newMessage);
-		newMessage = '';
+		if (sending) return;
+		const msg = newMessage.trim();
+		if (!msg) return;
+
+		sending = true;
+		if (sendingSpinnerTimer) clearTimeout(sendingSpinnerTimer);
+		sendingSpinnerTimer = setTimeout(() => (showSendingSpinner = true), 1000);
+
+		try {
+			await onSendMessage(msg);
+			newMessage = '';
+		} finally {
+			sending = false;
+			if (sendingSpinnerTimer) clearTimeout(sendingSpinnerTimer);
+			showSendingSpinner = false;
+		}
 	}
 
 	async function scrollToBottom() {
@@ -55,17 +71,30 @@
 				<div class="grid h-full place-items-center text-center text-sm text-base-content/50">
 					{m.no_messages_yet()}
 				</div>
-
 			{/if}
 		</div>
 		<form on:submit|preventDefault={handleSubmit} class="mt-4 flex gap-2">
 			<input
 				type="text"
 				bind:value={newMessage}
-				placeholder="Nachricht..."
+				placeholder="Message..."
 				class="input-bordered input w-full"
+				disabled={sending}
+				aria-busy={sending}
 			/>
-			<button type="submit" class="btn btn-primary" disabled={newMessage.length === 0}>{m.send()}</button>
+			<button
+				type="submit"
+				class="btn relative btn-primary"
+				disabled={newMessage.trim().length === 0 || sending}
+				aria-busy={sending}
+			>
+				<span class:invisible={sending}>{m.send()}</span>
+				{#if showSendingSpinner}
+					<span class="absolute inset-0 grid place-items-center">
+						<span class="loading loading-sm loading-spinner"></span>
+					</span>
+				{/if}
+			</button>
 		</form>
 	</div>
 </div>

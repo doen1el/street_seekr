@@ -1,7 +1,7 @@
 <p align="center">
     <img src="docs/icon/icon.png" alt="App Icon" width="100" />
     <br>
-    v1.0.0
+    v1.0.2
 </p>
 
 # StreetSeekr
@@ -90,6 +90,26 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
    docker-compose up -d --build
    ```
 5. Open your web browser and go to `http://localhost:5173` to access the application.
+
+6. (Optional) If you are using a reverse proxy like Nginx, you can set it up to forward requests to the appropriate services. Here is an example configuration:
+
+   ```nginx
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_http_version 1.1;
+
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    send_timeout 3600s;
+    proxy_buffering off;
+
+    client_max_body_size 10M;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+   ```
 
 ## 🚀 Contributing
 

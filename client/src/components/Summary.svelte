@@ -13,11 +13,18 @@
 	export let allPlayersFinished = false;
 	export let isFinalRound = false;
 	export let game: RecordModel;
+	export let onKick: (id: string) => void = () => {};
 
 	let mapContainer: HTMLElement;
 	let map: any;
 	let L: any;
 	let markersLayer: any;
+	let submittingNextRound = false;
+	let leavingGame = false;
+	let showNextRoundSpinner = false;
+	let nextRoundSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
+	let showLeavingSpinner = false;
+	let leavingSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
 
 	interface PlayerSummary extends RecordModel {
 		username: string;
@@ -42,72 +49,72 @@
 	});
 
 	function toLatLngArray(pos: LatLngExpression | null | undefined): [number, number] | null {
-        if (!pos) return null;
-        if (Array.isArray(pos) && pos.length >= 2) {
-            return [Number(pos[0]), Number(pos[1])];
-        }
-        if (typeof pos === 'object') {
-            if ('lat' in pos && 'lng' in pos) {
-                const latVal =
-                    typeof (pos as any).lat === 'function' ? (pos as any).lat() : (pos as any).lat;
-                const lngVal =
-                    typeof (pos as any).lng === 'function' ? (pos as any).lng() : (pos as any).lng;
-                return [Number(latVal), Number(lngVal)];
-            }
-        }
-        if (typeof pos === 'string') {
-            try {
-                const parsed = JSON.parse(pos);
-                return toLatLngArray(parsed as any);
-            } catch {
-                return null;
-            }
-        }
-        return null;
-    }
+		if (!pos) return null;
+		if (Array.isArray(pos) && pos.length >= 2) {
+			return [Number(pos[0]), Number(pos[1])];
+		}
+		if (typeof pos === 'object') {
+			if ('lat' in pos && 'lng' in pos) {
+				const latVal =
+					typeof (pos as any).lat === 'function' ? (pos as any).lat() : (pos as any).lat;
+				const lngVal =
+					typeof (pos as any).lng === 'function' ? (pos as any).lng() : (pos as any).lng;
+				return [Number(latVal), Number(lngVal)];
+			}
+		}
+		if (typeof pos === 'string') {
+			try {
+				const parsed = JSON.parse(pos);
+				return toLatLngArray(parsed as any);
+			} catch {
+				return null;
+			}
+		}
+		return null;
+	}
 
 	$: correctLatLng = toLatLngArray(correctLocation);
 
 	$: perPlayerRoundPoints = (() => {
-        const map = new Map<string, number>();
-        for (const g of guesses) {
-            const pid = g.player || g.expand?.player?.id;
-            if (!pid) continue;
-            map.set(pid, Number(g.points || 0));
-        }
-        return map;
-    })();
+		const map = new Map<string, number>();
+		for (const g of guesses) {
+			const pid = g.player || g.expand?.player?.id;
+			if (!pid) continue;
+			map.set(pid, Number(g.points || 0));
+		}
+		return map;
+	})();
 
 	$: playersWithGuesses = players.map((p) => {
-        const guess = guesses.find((g: any) => g.player === p.id || g.expand?.player?.id === p.id);
-        let guessCoords = toLatLngArray(guess?.location);
-        let distanceKm: number | null = null;
-        if (guessCoords && correctLatLng) {
-            const distanceMeters = calculateDistance(
-                guessCoords[0],
-                guessCoords[1],
-                correctLatLng[0],
-                correctLatLng[1]
-            );
-            distanceKm = Math.round((distanceMeters / 1000) * 10) / 10;
-        }
-        return {
-            ...p,
-            guessLocation: guessCoords,
-            points: perPlayerRoundPoints.get(p.id) ?? guess?.points ?? p.lastRoundPoints ?? 0,
-            distance: distanceKm,
-            __guessId: guess?.id,
-            __guessSrc: (guess as any)?.__src
-        };
-    });
+		const guess = guesses.find((g: any) => g.player === p.id || g.expand?.player?.id === p.id);
+		let guessCoords = toLatLngArray(guess?.location);
+		let distanceKm: number | null = null;
+		if (guessCoords && correctLatLng) {
+			const distanceMeters = calculateDistance(
+				guessCoords[0],
+				guessCoords[1],
+				correctLatLng[0],
+				correctLatLng[1]
+			);
+			distanceKm = Math.round((distanceMeters / 1000) * 10) / 10;
+		}
+		return {
+			...p,
+			guessLocation: guessCoords,
+			points: perPlayerRoundPoints.get(p.id) ?? guess?.points ?? p.lastRoundPoints ?? 0,
+			distance: distanceKm,
+			__guessId: guess?.id,
+			__guessSrc: (guess as any)?.__src
+		};
+	});
 
 	$: roundWinner =
-        [...players]
-            .map((p) => ({
-                ...p,
-                __roundPts: perPlayerRoundPoints.get(p.id) ?? p.lastRoundPoints ?? 0
-            }))
-            .sort((a, b) => b.__roundPts - a.__roundPts)[0] || players[0];
+		[...players]
+			.map((p) => ({
+				...p,
+				__roundPts: perPlayerRoundPoints.get(p.id) ?? p.lastRoundPoints ?? 0
+			}))
+			.sort((a, b) => b.__roundPts - a.__roundPts)[0] || players[0];
 	$: sortedPlayers = [...players].sort((a, b) => b.totalPoints - a.totalPoints);
 	$: __renderKey = JSON.stringify({
 		correctLatLng,
@@ -214,14 +221,14 @@
 					{/if}
 				</h2>
 				{#if game.status === 'summary' && (allPlayersFinished || isFinalRound)}
-				<div class="avatar my-2 justify-center">
-					<div class="w-24 rounded-full ring ring-primary ring-offset-2 ring-offset-base-100">
-						<img
-							src="https://api.dicebear.com/9.x/miniavs/svg?seed={roundWinner.username}"
-							alt="Avatar"
-						/>
+					<div class="avatar my-2 justify-center">
+						<div class="w-24 rounded-full ring ring-primary ring-offset-2 ring-offset-base-100">
+							<img
+								src="https://api.dicebear.com/9.x/miniavs/svg?seed={roundWinner.username}"
+								alt="Avatar"
+							/>
+						</div>
 					</div>
-				</div>
 				{/if}
 				{#if game.status === 'summary' && (allPlayersFinished || isFinalRound)}
 					<p class="text-2xl font-bold">{roundWinner.username}</p>
@@ -260,13 +267,11 @@
 									</td>
 									<td>
 										{#if playersWithGuesses.find((p) => p.id === player.id)?.distance !== null}
-                                            {playersWithGuesses.find((p) => p.id === player.id)?.distance} km
-										{:else}
-											{#if game.status === 'summary' && (allPlayersFinished || isFinalRound)}
+											{playersWithGuesses.find((p) => p.id === player.id)?.distance} km
+										{:else if game.status === 'summary' && (allPlayersFinished || isFinalRound)}
 											<span class="text-error">{m.no_guess()}</span>
-											{:else}
+										{:else}
 											<span class="italic opacity-70">{m.still_guessing()}</span>
-											{/if}
 										{/if}
 									</td>
 									<td class="font-semibold text-info">
@@ -275,6 +280,21 @@
 									<td class="font-bold">
 										{player.totalPoints}
 									</td>
+									<!-- {#if isAdmin}
+										{#if isAdmin}
+											<td class="text-right">
+												{#if player.id !== game.admin}
+													<button
+														class="btn btn-xs btn-error"
+														title="Kick"
+														on:click={() => onKick(player.id)}
+													>
+														X
+													</button>
+												{/if}
+											</td>
+										{/if}
+									{/if} -->
 								</tr>
 							{/each}
 						</tbody>
@@ -286,15 +306,62 @@
 		{#if isAdmin}
 			<div class="card bg-base-100 shadow-xl">
 				<div class="card-body flex-row items-center justify-center gap-4">
-					<form method="POST" action="?/nextRound" use:enhance class="flex-grow">
-						<button type="submit" class="btn w-full btn-primary" disabled={!allPlayersFinished}>
-							{#if isFinalRound}
-								{m.back_to_lobby()}
-							{:else}
-								{m.next_round()}
+					<button
+						type="button"
+						class="btn w-full flex-1 btn-outline btn-error"
+						on:click={() => (window as any).leave_game_modal.showModal()}
+						disabled={submittingNextRound}
+					>
+						{m.leave_game()}
+					</button>
+
+					<form
+						method="POST"
+						action="?/nextRound"
+						use:enhance={() => {
+							submittingNextRound = true;
+							if (nextRoundSpinnerTimer) clearTimeout(nextRoundSpinnerTimer);
+							nextRoundSpinnerTimer = setTimeout(() => (showNextRoundSpinner = true), 1000);
+							return async ({ update }) => {
+								try {
+									await update();
+								} finally {
+									submittingNextRound = false;
+									if (nextRoundSpinnerTimer) clearTimeout(nextRoundSpinnerTimer);
+									showNextRoundSpinner = false;
+								}
+							};
+						}}
+						class="flex-1"
+					>
+						<button
+							type="submit"
+							class="btn relative w-full btn-primary"
+							disabled={!allPlayersFinished || submittingNextRound}
+							aria-busy={submittingNextRound}
+						>
+							<span class:invisible={submittingNextRound}>
+								{#if isFinalRound}{m.back_to_lobby()}{:else}{m.next_round()}{/if}
+							</span>
+							{#if showNextRoundSpinner}
+								<span class="absolute inset-0 grid place-items-center">
+									<span class="loading loading-sm loading-spinner"></span>
+								</span>
 							{/if}
 						</button>
 					</form>
+				</div>
+			</div>
+		{:else}
+			<div class="card bg-base-100 shadow-xl">
+				<div class="card-body">
+					<button
+						type="button"
+						class="btn w-full btn-outline btn-error"
+						on:click={() => (window as any).leave_game_modal.showModal()}
+					>
+						{m.leave_game()}
+					</button>
 				</div>
 			</div>
 		{/if}
@@ -302,10 +369,61 @@
 </div>
 
 {#if game.status === 'summary' && isFinalRound && allPlayersFinished}
-    <GameSummary
-        gameId={game.id}
-        {players}
-        rounds={game.maxRounds}
-        refreshKey={`${game.status}:${guesses.length}:${players.map(p=>p.totalPoints).join('-')}`}
-    />
+	<GameSummary
+		gameId={game.id}
+		{players}
+		rounds={game.maxRounds}
+		refreshKey={`${game.status}:${guesses.length}:${players.map((p) => p.totalPoints).join('-')}`}
+	/>
 {/if}
+
+<dialog id="leave_game_modal" class="modal">
+	<div class="modal-box">
+		<h3 class="text-lg font-bold">{m.leave_game()}</h3>
+		{#if isAdmin}
+			<p class="py-4">{m.leave_game_admin_confirmation()}</p>
+		{:else}
+			<p class="py-4">{m.leave_game_confirmation()}</p>
+		{/if}
+		<div class="modal-action">
+			<form
+				method="POST"
+				action="?/leaveGame"
+				use:enhance={() => {
+					leavingGame = true;
+					if (leavingSpinnerTimer) clearTimeout(leavingSpinnerTimer);
+					leavingSpinnerTimer = setTimeout(() => (showLeavingSpinner = true), 1000);
+					return async ({ update }) => {
+						try {
+							await update();
+						} finally {
+							leavingGame = false;
+							if (leavingSpinnerTimer) clearTimeout(leavingSpinnerTimer);
+							showLeavingSpinner = false;
+						}
+					};
+				}}
+			>
+				<button
+					class="btn relative btn-error"
+					type="submit"
+					disabled={leavingGame}
+					aria-busy={leavingGame}
+				>
+					<span class:invisible={leavingGame}>{m.yes_leave()}</span>
+					{#if showLeavingSpinner}
+						<span class="absolute inset-0 grid place-items-center">
+							<span class="loading loading-sm loading-spinner"></span>
+						</span>
+					{/if}
+				</button>
+			</form>
+			<form method="dialog">
+				<button class="btn">{m.abort()}</button>
+			</form>
+		</div>
+	</div>
+	<form method="dialog" class="modal-backdrop">
+		<button>{m.close()}</button>
+	</form>
+</dialog>

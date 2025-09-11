@@ -8,6 +8,7 @@
 	export let currentRound;
 	export let totalRounds;
 	export let roundDuration;
+	export let remainingSeconds: number | undefined;
 	export let username;
 
 	const dispatch = createEventDispatcher<{
@@ -19,7 +20,9 @@
 	let mapSize: 'small' | 'large' = 'small';
 	let selectedLocation: [number, number] | null = null;
 	let guessMade = false;
-	let timeLeft = roundDuration;
+	let showGuessSpinner = false;
+	let guessSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
+	let timeLeft = remainingSeconds ?? roundDuration;
 	let timer: ReturnType<typeof setInterval>;
 	let viewer: any;
 
@@ -54,6 +57,7 @@
 		return () => {
 			viewer.remove();
 			clearInterval(timer);
+			if (guessSpinnerTimer) clearTimeout(guessSpinnerTimer);
 
 			document.documentElement.style.overflow = prevHtmlOverflow;
 			document.body.style.overflow = prevBodyOverflow;
@@ -62,10 +66,15 @@
 
 	onDestroy(() => {
 		clearInterval(timer);
+		if (guessSpinnerTimer) clearTimeout(guessSpinnerTimer);
 	});
 
 	$: minutes = Math.floor(timeLeft / 60);
 	$: seconds = timeLeft % 60;
+
+	$: if (remainingSeconds != null && !guessMade) {
+		timeLeft = remainingSeconds;
+	}
 
 	function handleLocationSelected(event: CustomEvent<[number, number]>) {
 		selectedLocation = event.detail;
@@ -75,6 +84,9 @@
 		if (guessMade) return;
 		guessMade = true;
 		clearInterval(timer);
+
+		if (guessSpinnerTimer) clearTimeout(guessSpinnerTimer);
+		guessSpinnerTimer = setTimeout(() => (showGuessSpinner = true), 1000);
 
 		dispatch('guess', selectedLocation);
 	}
@@ -133,18 +145,26 @@
 			<button
 				class="btn btn-square btn-ghost btn-sm"
 				on:click={toggleMapSize}
-				title={mapSize === 'small' ? 'Vergrößern' : 'Verkleinern'}
+				title={mapSize === 'small' ? m.increase() : m.decrease()}
 			>
 				<ChevronsRightLeft class="size-4" />
 			</button>
 
 			<button
-				class="btn font-bold btn-sm btn-primary"
+				class="btn relative font-bold btn-sm btn-primary"
 				on:click={makeGuess}
 				disabled={!selectedLocation || guessMade}
+				aria-busy={guessMade}
 			>
-				<Check class="size-4" />
-				{m.guess()}
+				<span class:invisible={guessMade} class="inline-flex items-center gap-1">
+					<Check class="size-4" />
+					{m.guess()}
+				</span>
+				{#if showGuessSpinner}
+					<span class="absolute inset-0 grid place-items-center">
+						<span class="loading loading-sm loading-spinner"></span>
+					</span>
+				{/if}
 			</button>
 		</div>
 	</div>

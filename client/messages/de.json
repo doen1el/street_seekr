@@ -77,5 +77,6 @@
 	"please_wait": "Bitte warten...",
 	"list_of_areas_placeholder": "z.B. Deutschland, Nordrhein-Westfalen, Köln",
 	"guesses_in_progress": "Es wird noch geraten...",
-	"still_guessing": "Ratet noch"
+	"still_guessing": "Ratet noch",
+	"joined_after_round": "Nach Rundenstart beigetreten"
 }

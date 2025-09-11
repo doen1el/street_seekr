@@ -76,5 +76,6 @@
 	"please_wait": "Please wait...",
 	"list_of_areas_placeholder": "e.g. America, California, Los Angeles",
 	"guesses_in_progress": "Guesses in progress...",
-	"still_guessing": "Still guessing"
+	"still_guessing": "Still guessing",
+	"joined_after_round": "Joined after round started"
 }

@@ -21,6 +21,9 @@
 	let correctLocation: [number, number] = [0, 0];
 	let view: 'guessing' | 'summary' = game.status === 'summary' ? 'summary' : 'guessing';
 	let guessSubmitted = false;
+	let joining = false;
+	let showJoinSpinner = false;
+	let joinSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: game = data.game;
 	$: currentPlayer = data.currentPlayer;
@@ -45,15 +48,38 @@
 		'locationStrings'
 	];
 
+	const serverClockOffset = Date.now() - (data.serverNow ?? Date.now());
+
+	function nowServerMs() {
+		return Date.now() - serverClockOffset;
+	}
+
+	function computeRemainingSeconds(g: any): number | null {
+		if (!g?.round_deadline_at) return null;
+		const deadlineMs = new Date(g.round_deadline_at).getTime();
+		return Math.max(0, Math.ceil((deadlineMs - nowServerMs()) / 1000));
+	}
+
 	const {
 		form,
 		errors,
 		enhance: joinEnhance
 	} = superForm(data.form, {
+		onSubmit: () => {
+			joining = true;
+			if (joinSpinnerTimer) clearTimeout(joinSpinnerTimer);
+			joinSpinnerTimer = setTimeout(() => (showJoinSpinner = true), 1000);
+		},
 		onResult: ({ result }) => {
-			if (result.type === 'success') {
-				invalidateAll();
-			}
+			joining = false;
+			if (joinSpinnerTimer) clearTimeout(joinSpinnerTimer);
+			showJoinSpinner = false;
+			if (result.type === 'success') invalidateAll();
+		},
+		onError: () => {
+			joining = false;
+			if (joinSpinnerTimer) clearTimeout(joinSpinnerTimer);
+			showJoinSpinner = false;
 		}
 	});
 
@@ -161,27 +187,41 @@
 
 		const unsubPlayers = pb.collection('players').subscribe('*', (e) => {
 			if (!e.record) return;
-			if (!(game.players || []).includes(e.record.id)) return;
 
 			const currentPlayers = data.game.expand?.players || [];
-			const pIdx = currentPlayers.findIndex((p: any) => p.id === e.record.id);
-			let updatedPlayers;
-			if (pIdx === -1) {
-				updatedPlayers = [...currentPlayers, e.record];
-			} else {
-				updatedPlayers = [
-					...currentPlayers.slice(0, pIdx),
-					{ ...currentPlayers[pIdx], ...e.record },
-					...currentPlayers.slice(pIdx + 1)
-				];
-			}
-			data.game = {
-				...data.game,
-				expand: {
-					...data.game.expand,
-					players: updatedPlayers
+			const idx = currentPlayers.findIndex((p: any) => p.id === e.record.id);
+
+			if (e.action === 'delete') {
+				if (idx !== -1) {
+					const updatedPlayers = [
+						...currentPlayers.slice(0, idx),
+						...currentPlayers.slice(idx + 1)
+					];
+					const ready = data.game.expand?.ready_players || [];
+					const rpIdx = ready.findIndex((p: any) => p.id === e.record.id);
+					const updatedReady =
+						rpIdx === -1 ? ready : [...ready.slice(0, rpIdx), ...ready.slice(rpIdx + 1)];
+
+					data.game = {
+						...data.game,
+						expand: { ...data.game.expand, players: updatedPlayers, ready_players: updatedReady }
+					};
 				}
-			};
+				return;
+			}
+
+			if (!(game.players || []).includes(e.record.id)) return;
+
+			const updatedPlayers =
+				idx === -1
+					? [...currentPlayers, e.record]
+					: [
+							...currentPlayers.slice(0, idx),
+							{ ...currentPlayers[idx], ...e.record },
+							...currentPlayers.slice(idx + 1)
+						];
+
+			data.game = { ...data.game, expand: { ...data.game.expand, players: updatedPlayers } };
 		});
 
 		if (game.status === 'summary') {
@@ -200,6 +240,8 @@
 	$: correctLocation = currentRound?.location
 		? [currentRound.location[1], currentRound.location[0]]
 		: [0, 0];
+
+	$: remainingSeconds = computeRemainingSeconds(game);
 
 	let summaryRefetchTimer: any = null;
 	$: {
@@ -225,25 +267,25 @@
 	}
 
 	async function fetchSummaryData() {
-        try {
-            console.debug('[fetchSummaryData] start', {
-                round: game.currentRound,
-                status: game.status
-            });
-            const guessesResponse = await pb.collection('guesses').getFullList({
-                filter: `game="${game.id}" && round=${game.currentRound}`,
-                sort: 'updated',
-                expand: 'player'
-            });
-            guesses = guessesResponse.map(g => ({ ...g, __src: 'fetch' }));
-            playersFinished = guessesResponse.length;
-            allPlayersFinished = playersFinished === players.length;
+		try {
+			console.debug('[fetchSummaryData] start', {
+				round: game.currentRound,
+				status: game.status
+			});
+			const guessesResponse = await pb.collection('guesses').getFullList({
+				filter: `game="${game.id}" && round=${game.currentRound}`,
+				sort: 'updated',
+				expand: 'player'
+			});
+			guesses = guessesResponse.map((g) => ({ ...g, __src: 'fetch' }));
+			playersFinished = guessesResponse.length;
+			allPlayersFinished = playersFinished === players.length;
 
-            await fetchPlayersForScores();
-        } catch (err) {
-            console.error('Error fetching summary data:', err);
-        }
-    }
+			await fetchPlayersForScores();
+		} catch (err) {
+			console.error('Error fetching summary data:', err);
+		}
+	}
 
 	async function fetchPlayersForScores() {
 		try {
@@ -323,15 +365,29 @@
 	}
 
 	async function kickPlayer(playerId: string) {
-		if (!isAdmin) return;
-		if (!playerId) return;
-		if (playerId === currentPlayer?.id) return;
+		if (!isAdmin || !playerId || playerId === currentPlayer?.id) return;
+
 		const fd = new FormData();
 		fd.append('playerId', playerId);
+
 		const res = await fetch('?/kickPlayer', { method: 'POST', body: fd });
 		if (!res.ok) {
 			console.warn('Kick failed', await res.text());
+			return;
 		}
+
+		const curPlayers = data.game.expand?.players || [];
+		const curReady = data.game.expand?.ready_players || [];
+		data.game = {
+			...data.game,
+			expand: {
+				...data.game.expand,
+				players: curPlayers.filter((p: any) => p.id !== playerId),
+				ready_players: curReady.filter((p: any) => p.id !== playerId)
+			}
+		};
+
+		await invalidateAll();
 	}
 
 	$: if (currentPlayer && $form.username === '') {
@@ -358,6 +414,8 @@
 							class="input-bordered input input-lg w-full"
 							class:input-error={$errors.username}
 							bind:value={$form.username}
+							disabled={joining}
+							aria-busy={joining}
 						/>
 						{#if $errors.username}
 							<label class="label" for="username">
@@ -366,7 +424,19 @@
 						{/if}
 					</div>
 					<div class="card-actions flex-col gap-2">
-						<button type="submit" class="btn w-full btn-primary">{m.join()}</button>
+						<button
+							type="submit"
+							class="btn relative w-full btn-primary"
+							disabled={joining || !($form.username && $form.username.trim().length > 0)}
+							aria-busy={joining}
+						>
+							<span class:invisible={joining}>{m.join()}</span>
+							{#if showJoinSpinner}
+								<span class="absolute inset-0 grid place-items-center">
+									<span class="loading loading-sm loading-spinner"></span>
+								</span>
+							{/if}
+						</button>
 						<a href="/" class="btn w-full btn-ghost">{m.back_to_main_menu()}</a>
 					</div>
 				</form>
@@ -376,26 +446,26 @@
 {/if}
 
 {#if isGeneratingChallenge}
-    <div class="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div class="flex flex-col items-center gap-4 text-white">
-            <span class="loading loading-lg loading-spinner"></span>
-            <span class="text-2xl font-bold">{m.creating_game()}</span>
-            {#if game.generation_target >= 1 || game.generation_found >= 0}
-                <div class="w-64">
-                    <progress
-                        class="progress w-full progress-primary"
-                        value={game.generation_found}
-                        max={game.generation_target}
-                    ></progress>
-                    <p class="mt-1 text-center font-mono text-sm">
-                        {game.generation_found}/{game.generation_target}
-                    </p>
-                </div>
-            {:else}
-                <p class="text-sm opacity-70">{m.please_wait()}</p>
-            {/if}
-        </div>
-    </div>
+	<div class="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+		<div class="flex flex-col items-center gap-4 text-white">
+			<span class="loading loading-lg loading-spinner"></span>
+			<span class="text-2xl font-bold">{m.creating_game()}</span>
+			{#if game.generation_target >= 1 || game.generation_found >= 0}
+				<div class="w-64">
+					<progress
+						class="progress w-full progress-primary"
+						value={game.generation_found}
+						max={game.generation_target}
+					></progress>
+					<p class="mt-1 text-center font-mono text-sm">
+						{game.generation_found}/{game.generation_target}
+					</p>
+				</div>
+			{:else}
+				<p class="text-sm opacity-70">{m.please_wait()}</p>
+			{/if}
+		</div>
+	</div>
 {/if}
 
 <div class="transition-all duration-300" class:pointer-events-none={!isPlayerInGame}>
@@ -422,6 +492,7 @@
 				currentRound={game.currentRound}
 				totalRounds={game.maxRounds}
 				roundDuration={game.timeLimit}
+				remainingSeconds={remainingSeconds ?? game.timeLimit}
 				on:guess={handleGuess}
 			/>
 		{:else if view === 'summary'}
@@ -433,6 +504,7 @@
 				{isAdmin}
 				{allPlayersFinished}
 				{isFinalRound}
+				onKick={kickPlayer}
 			/>
 		{/if}
 	{:else}

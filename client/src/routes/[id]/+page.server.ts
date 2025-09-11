@@ -53,8 +53,9 @@ export const load: PageServerLoad = async ({ locals, cookies, params }) => {
 	}
 
 	const form = await superValidate(zod(joinLobbySchema));
+	const serverNow = Date.now();
 
-	return { game, currentPlayer, isPlayerInGame, form };
+	return { game, currentPlayer, isPlayerInGame, form, serverNow };
 };
 
 export const actions: Actions = {
@@ -221,13 +222,16 @@ export const actions: Actions = {
 
 			await Promise.all(guesses.map((guess) => locals.pb.collection('guesses').delete(guess.id)));
 
+			const deadline = new Date(Date.now() + game.timeLimit * 1000).toISOString();
+
 			await locals.pb.collection('games').update(game.id, {
 				challenge: { rounds: roundData },
 				status: 'playing',
 				currentRound: 1,
 				is_generating_challenge: false,
 				generation_found: roundData.length,
-				ready_players: game.admin ? [game.admin] : []
+				ready_players: game.admin ? [game.admin] : [],
+				round_deadline_at: deadline
 			});
 
 			return { success: true, message: 'Game is starting' };
@@ -250,6 +254,13 @@ export const actions: Actions = {
 
 		const currentRoundData = game.challenge.rounds[game.currentRound - 1];
 		const correctLocation = currentRoundData.location;
+
+		if (game.round_deadline_at) {
+			const deadlineMs = new Date(game.round_deadline_at).getTime();
+			if (Date.now() > deadlineMs) {
+				return fail(400, { message: 'Round timed out' });
+			}
+		}
 
 		let points = 0;
 		if (guessLocation) {
@@ -305,9 +316,11 @@ export const actions: Actions = {
 		if (game.currentRound >= game.maxRounds) {
 			await locals.pb.collection('games').update(game.id, { status: 'lobby' });
 		} else {
+			const deadline = new Date(Date.now() + game.timeLimit * 1000).toISOString();
 			await locals.pb.collection('games').update(game.id, {
 				status: 'playing',
-				currentRound: game.currentRound + 1
+				currentRound: game.currentRound + 1,
+				round_deadline_at: deadline
 			});
 		}
 
