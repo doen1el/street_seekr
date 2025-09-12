@@ -62,20 +62,16 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
 
    ```yaml
    pocketbase:
-       ports:
-       - "PORT:8090"
-       command: ['serve', '--http=0.0.0.0:PORT', '--auto-migrate']
-       healthcheck:
-           test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:PORT/api/health']
+     ports:
+       - 'PORT:8090'
+     command: ['serve', '--http=0.0.0.0:8090', '--auto-migrate']
+     healthcheck:
+       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health']
    web:
-       build:
-           args:
-               - PUBLIC_POCKETBASE_URL: http://localhost:PORT
-               POCKETBASE_URL: http://pocketbase:PORT
-       environment:
-       - POCKETBASE_URL=http://pocketbase:PORT
-       ports:
-       - "PORT:3000"
+     environment:
+       - PUBLIC_POCKETBASE_URL=http://pocketbase:PORT
+     ports:
+       - 'PORT:3000'
    ```
 
    3.3 (Optional) If you want to change the default domain, you can modify the `ORIGIN` environment variable under the `web` service.

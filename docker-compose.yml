@@ -5,12 +5,12 @@ services:
     restart: unless-stopped
     ports:
       - '8090:8090' # change 8090 to the port you want to use
-    command: ['serve', '--http=0.0.0.0:8090', '--auto-migrate'] # change 8090 to the port you want to use
+    command: ['serve', '--http=0.0.0.0:8090', '--auto-migrate']
     volumes:
       - pb_data:/pb_data
       - ./database/pb_migrations:/pb_migrations
     healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health'] # change 8090 to the port you want to use
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health']
       interval: 60s
       timeout: 5s
       retries: 3
@@ -23,9 +23,9 @@ services:
       dockerfile: Dockerfile
     environment:
       ORIGIN: http://localhost:5173 # change this to your domain in production
-      POCKETBASE_URL: http://pocketbase:8090 # change 8090 to the port you want to use
-      PUBLIC_POCKETBASE_URL: http://localhost:8090 # change 8090 to the port you want to use
-      MAPILLARY_ACCESS_TOKEN: 'TOKEN' # change this to your own token
+      POCKETBASE_URL: http://pocketbase:8090
+      PUBLIC_POCKETBASE_URL: http://localhost:8090 # change 8090 to the port or domain you want to use
+      MAPILLARY_ACCESS_TOKEN: 'TOKEN'
       BODY_SIZE_LIMIT: 5242880
     depends_on:
       pocketbase:
