@@ -114,9 +114,7 @@ export async function generateRandomPointsForChallenge(
 		for (let attempt = 0; attempt <= retries; attempt++) {
 			try {
 				const url = `${BASE_URL}?${params.toString()}`;
-				const res = await fetch(url, {
-					signal: AbortSignal.timeout(10000)
-				});
+				const res = await fetch(url);
 
 				if (!res.ok) {
 					const errorText = await res.text();
@@ -136,11 +134,23 @@ export async function generateRandomPointsForChallenge(
 						error: errorJson || errorText
 					});
 
-					if (res.status === 500 || res.status === 400) {
+					// 400 = Bad Request → keine Retries
+					if (res.status === 400) {
 						return null;
 					}
+
+					// 429 = Rate Limit → längeres Backoff
+					if (res.status === 429) {
+						if (attempt < retries) {
+							await sleep(2000 * (attempt + 1));
+							continue;
+						}
+						return null;
+					}
+
+					// 500 und andere Fehler → Standard-Retry
 					if (attempt < retries) {
-						await sleep(300 * (attempt + 1));
+						await sleep(500 * (attempt + 1));
 						continue;
 					}
 					return null;
@@ -164,7 +174,6 @@ export async function generateRandomPointsForChallenge(
 				usedIds.add(picked.id);
 				return { id: picked.id, location: [lon, lat] };
 			} catch (err) {
-				const isTimeout = err instanceof Error && err.name === 'TimeoutError';
 				const isNetworkError =
 					err instanceof Error &&
 					(err.message.includes('fetch failed') || err.message.includes('ECONNRESET'));
@@ -172,7 +181,6 @@ export async function generateRandomPointsForChallenge(
 				console.error('[fetchRandomImageFromBBox] exception', {
 					attempt: attempt + 1,
 					maxRetries: retries + 1,
-					isTimeout,
 					isNetworkError,
 					box,
 					error:
@@ -185,7 +193,7 @@ export async function generateRandomPointsForChallenge(
 							: err
 				});
 
-				if (attempt < retries && (isTimeout || isNetworkError)) {
+				if (attempt < retries && isNetworkError) {
 					await sleep(500 * (attempt + 1));
 					continue;
 				}
