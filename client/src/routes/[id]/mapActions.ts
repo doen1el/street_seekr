@@ -134,12 +134,10 @@ export async function generateRandomPointsForChallenge(
 						error: errorJson || errorText
 					});
 
-					// 400 = Bad Request → keine Retries
 					if (res.status === 400) {
 						return null;
 					}
 
-					// 429 = Rate Limit → längeres Backoff
 					if (res.status === 429) {
 						if (attempt < retries) {
 							await sleep(2000 * (attempt + 1));
@@ -148,7 +146,6 @@ export async function generateRandomPointsForChallenge(
 						return null;
 					}
 
-					// 500 und andere Fehler → Standard-Retry
 					if (attempt < retries) {
 						await sleep(500 * (attempt + 1));
 						continue;
