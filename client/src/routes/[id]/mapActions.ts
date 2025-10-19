@@ -88,63 +88,136 @@ export async function generateRandomPointsForChallenge(
 		return [];
 	}
 
-	const [minLon, minLat, maxLon, maxLat] = polygon ? turf.bbox(polygon) : [-180, -90, 180, 90];
+	const MAX_HALF_SIZE = 0.05;
+
+	const [minLon, minLat, maxLon, maxLat] = polygon ? turf.bbox(polygon) : [-180, -85, 180, 85];
 
 	const results: Array<{ id: string; location: number[] }> = [];
+	const usedIds = new Set<string>();
 
 	function randomPointInBBox(): [number, number] {
 		return [Math.random() * (maxLon - minLon) + minLon, Math.random() * (maxLat - minLat) + minLat];
 	}
 
 	async function fetchRandomImageFromBBox(
-		box: [number, number, number, number]
+		box: [number, number, number, number],
+		retries = 3
 	): Promise<{ id: string; location: number[] } | null> {
 		const params = new URLSearchParams({
 			access_token: MAPILLARY_ACCESS_TOKEN,
 			bbox: box.join(','),
-			fields: 'id,geometry,is_pano',
-			limit: '20',
+			fields: 'id,geometry',
+			limit: '50',
 			is_pano: 'true'
 		});
-		try {
-			const res = await fetch(`${BASE_URL}?${params.toString()}`);
-			if (!res.ok) return null;
-			let imgs: any[] = (await res.json())?.data || [];
-			if (polygon) {
-				imgs = imgs.filter((it) =>
-					turf.booleanPointInPolygon(turf.point(it.geometry.coordinates), polygon as any)
-				);
+
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			try {
+				const url = `${BASE_URL}?${params.toString()}`;
+				const res = await fetch(url, {
+					signal: AbortSignal.timeout(10000)
+				});
+
+				if (!res.ok) {
+					const errorText = await res.text();
+					let errorJson: any = null;
+					try {
+						errorJson = JSON.parse(errorText);
+					} catch {}
+
+					const boxArea = (box[2] - box[0]) * (box[3] - box[1]);
+					console.warn('[fetchRandomImageFromBBox] API error', {
+						status: res.status,
+						statusText: res.statusText,
+						box,
+						boxArea: boxArea.toFixed(6),
+						attempt: attempt + 1,
+						maxRetries: retries + 1,
+						error: errorJson || errorText
+					});
+
+					if (res.status === 500 || res.status === 400) {
+						return null;
+					}
+					if (attempt < retries) {
+						await sleep(300 * (attempt + 1));
+						continue;
+					}
+					return null;
+				}
+
+				const json = await res.json();
+				let imgs: any[] = json?.data || [];
+
+				if (polygon) {
+					imgs = imgs.filter((it) =>
+						turf.booleanPointInPolygon(turf.point(it.geometry.coordinates), polygon as any)
+					);
+				}
+
+				imgs = imgs.filter((it) => !usedIds.has(it.id));
+
+				if (!imgs.length) return null;
+
+				const picked = imgs[Math.floor(Math.random() * imgs.length)];
+				const [lon, lat] = picked.geometry.coordinates;
+				usedIds.add(picked.id);
+				return { id: picked.id, location: [lon, lat] };
+			} catch (err) {
+				const isTimeout = err instanceof Error && err.name === 'TimeoutError';
+				const isNetworkError =
+					err instanceof Error &&
+					(err.message.includes('fetch failed') || err.message.includes('ECONNRESET'));
+
+				console.error('[fetchRandomImageFromBBox] exception', {
+					attempt: attempt + 1,
+					maxRetries: retries + 1,
+					isTimeout,
+					isNetworkError,
+					box,
+					error:
+						err instanceof Error
+							? {
+									name: err.name,
+									message: err.message,
+									cause: (err as any).cause
+								}
+							: err
+				});
+
+				if (attempt < retries && (isTimeout || isNetworkError)) {
+					await sleep(500 * (attempt + 1));
+					continue;
+				}
+				return null;
 			}
-			if (!imgs.length) return null;
-			const picked = imgs[Math.floor(Math.random() * imgs.length)];
-			const [lon, lat] = picked.geometry.coordinates;
-			return { id: picked.id, location: [lon, lat] };
-		} catch {
-			return null;
 		}
+		return null;
 	}
 
 	async function sleep(ms: number) {
 		return new Promise((r) => setTimeout(r, ms));
 	}
 
-	/* ---------------- GLOBAL MODE (unverändert) ---------------- */
+	/* ---------------- GLOBAL MODE ---------------- */
 	if (!polygon) {
-		const DELAY_MS = 250;
-		const maxAttempts = count * 80;
+		const DELAY_MS = 200;
+		const maxAttempts = count * 100;
 		let attempts = 0;
+		const halfSizes = [0.01, 0.02, 0.03, 0.04, MAX_HALF_SIZE];
+
 		while (results.length < count && attempts < maxAttempts) {
 			attempts++;
 			const [lon, lat] = randomPointInBBox();
-			if (lat > 75 || lat < -60) continue;
-			const halfSizes = [0.25, 0.6, 1.2, 2.0];
+
 			for (const half of halfSizes) {
 				const box: [number, number, number, number] = [
-					Math.max(minLon, lon - half),
-					Math.max(minLat, lat - half),
-					Math.min(maxLon, lon + half),
-					Math.min(maxLat, lat + half)
+					Math.max(-180, lon - half),
+					Math.max(-85, lat - half),
+					Math.min(180, lon + half),
+					Math.min(85, lat + half)
 				];
+
 				const hit = await fetchRandomImageFromBBox(box);
 				if (hit) {
 					results.push(hit);
@@ -159,53 +232,55 @@ export async function generateRandomPointsForChallenge(
 					break;
 				}
 			}
-			if (attempts % 60 === 0 && results.length < count) {
+
+			if (attempts % 50 === 0 && results.length < count) {
 				console.log('[generateRandomPoints][global] progress', {
 					attempts,
 					collected: results.length
 				});
 			}
 		}
+
 		console.log('[generateRandomPoints][global] finished', {
 			requested: count,
-			got: results.length
+			got: results.length,
+			attempts
 		});
 	} else {
-		/* ---------------- POLYGON MODE MIT RETRIES ---------------- */
+		/* ---------------- POLYGON MODE ---------------- */
 		const baseCandidateMultiplier = 6;
-		const maxPasses = 5; // Sicherheit
-		const delayHit = 250;
-		const delayMiss = 40;
+		const maxPasses = 5;
+		const delayHit = 150;
+		const delayMiss = 20;
 
-		// gestaffelte HalfSize-Tiers (werden je Pass erweitert)
 		const halfSizeTiers: number[][] = [
-			[0.1, 0.18, 0.25, 0.35, 0.5],
-			[0.6, 0.8, 1.0],
-			[1.3, 1.6, 2.0],
-			[2.5, 3.5],
-			[5, 6.5, 8]
+			[0.005, 0.01, 0.015, 0.02],
+			[0.025, 0.03, 0.035, 0.04],
+			[0.045, MAX_HALF_SIZE]
 		];
 
 		let pass = 0;
 		while (results.length < count && pass < maxPasses) {
 			const remaining = count - results.length;
 			const candidateTarget = Math.min(
-				5000,
-				Math.max(remaining * baseCandidateMultiplier, remaining)
+				2000,
+				Math.max(remaining * baseCandidateMultiplier, remaining * 2)
 			);
-			// Kandidaten sammeln
 			const candidates: [number, number][] = [];
-			while (candidates.length < candidateTarget) {
+
+			let safetyCounter = 0;
+			while (candidates.length < candidateTarget && safetyCounter < candidateTarget * 10) {
+				safetyCounter++;
 				const p = randomPointInBBox();
 				if (!turf.booleanPointInPolygon(turf.point(p), polygon as any)) continue;
 				candidates.push(p);
 			}
 
-			// Farthest-point Auswahl für diesen Pass
 			const centers: [number, number][] = [];
 			if (candidates.length) {
 				centers.push(candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0]);
 			}
+
 			while (centers.length < remaining && candidates.length) {
 				let bestIdx = -1;
 				let bestDist = -1;
@@ -228,42 +303,49 @@ export async function generateRandomPointsForChallenge(
 			console.log('[generateRandomPoints][poly][pass] start', {
 				pass,
 				remaining,
-				centers: centers.length
+				centers: centers.length,
+				candidatesGenerated: candidates.length + centers.length
 			});
 
-			// Tiers bis pass einschließen (mehr Reichweite je Pass)
-			const activeHalfSizes = halfSizeTiers.slice(0, Math.min(pass + 1, halfSizeTiers.length));
-			const flattened = activeHalfSizes.flat();
+			const tierIdx = Math.min(pass, halfSizeTiers.length - 1);
+			const flattened = halfSizeTiers[tierIdx];
 
-			for (const [lon, lat] of centers) {
+			const batchSize = 3;
+			for (let i = 0; i < centers.length; i += batchSize) {
 				if (results.length >= count) break;
-				let found = false;
-				for (const half of flattened) {
-					const box: [number, number, number, number] = [
-						Math.max(minLon, lon - half),
-						[Math.max(minLat, lat - half)][0],
-						Math.min(maxLon, lon + half),
-						Math.min(maxLat, lat + half)
-					];
-					const hit = await fetchRandomImageFromBBox(box);
-					if (hit) {
+
+				const batch = centers.slice(i, Math.min(i + batchSize, centers.length));
+				const batchPromises = batch.map(async ([lon, lat]) => {
+					for (const half of flattened) {
+						const box: [number, number, number, number] = [
+							Math.max(minLon, lon - half),
+							Math.max(minLat, lat - half),
+							Math.min(maxLon, lon + half),
+							Math.min(maxLat, lat + half)
+						];
+
+						const hit = await fetchRandomImageFromBBox(box);
+						if (hit) {
+							await sleep(delayHit);
+							return hit;
+						} else {
+							await sleep(delayMiss);
+						}
+					}
+					return null;
+				});
+
+				const batchResults = await Promise.all(batchPromises);
+				for (const hit of batchResults) {
+					if (hit && results.length < count) {
 						results.push(hit);
 						if (onProgress) await onProgress(results.length, count);
 						console.log('[generateRandomPoints][poly] hit', {
 							pass,
 							collected: results.length,
-							target: count,
-							half
+							target: count
 						});
-						found = true;
-						await sleep(delayHit);
-						break;
-					} else {
-						await sleep(delayMiss);
 					}
-				}
-				if (!found) {
-					console.log('[generateRandomPoints][poly] center failed', { pass, center: [lon, lat] });
 				}
 			}
 
@@ -277,7 +359,7 @@ export async function generateRandomPointsForChallenge(
 		}
 
 		if (results.length < count) {
-			console.warn('[generateRandomPoints][poly] insufficient coverage after retries', {
+			console.warn('[generateRandomPoints][poly] insufficient coverage', {
 				requested: count,
 				got: results.length,
 				passes: pass
@@ -288,7 +370,7 @@ export async function generateRandomPointsForChallenge(
 	console.log('[generateRandomPoints] final', {
 		requested: count,
 		returned: results.length,
-		locations: results.map((r) => r.location)
+		uniqueIds: usedIds.size
 	});
 	return results;
 }

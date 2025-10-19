@@ -13,7 +13,7 @@
 	export let allPlayersFinished = false;
 	export let isFinalRound = false;
 	export let game: RecordModel;
-	export let onKick: (id: string) => void = () => {};
+	export const onKick: (id: string) => void = () => {};
 
 	let mapContainer: HTMLElement;
 	let map: any;
