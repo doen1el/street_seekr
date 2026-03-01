@@ -24,7 +24,8 @@ services:
       ORIGIN: http://localhost:5173 # change this to your domain in production
       POCKETBASE_URL: http://pocketbase:8090
       PUBLIC_POCKETBASE_URL: http://localhost:8090 # change 8090 to the port or domain you want to use
-      MAPILLARY_ACCESS_TOKEN: 'TOKEN'
+      PANORAMAX_API_URL: https://panoramax.ign.fr/api
+      PUBLIC_PANORAMAX_VIEWER_URL: https://panoramax.ign.fr
       BODY_SIZE_LIMIT: 5242880
     depends_on:
       pocketbase:

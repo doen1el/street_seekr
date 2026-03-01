@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { RecordModel } from 'pocketbase';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { env } from '$env/dynamic/public';
 	import { m } from '$lib/paraglide/messages.js';
 
 	export let game: RecordModel;
@@ -11,10 +12,30 @@
 	let previewMapContainer: HTMLDivElement;
 	let previewMap: L.Map;
 	let drawnItems: L.FeatureGroup;
+	let coverageLayer: L.LayerGroup | null = null;
 	let L: typeof import('leaflet');
 	let locationInput = (game.locationStrings as string[])?.join(', ') || '';
+	let coverageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	let coverageRefreshToken = 0;
+	let isDestroyed = false;
 
     let lastPolygonJSON: string | null = game.polygon ? JSON.stringify(game.polygon) : null;
+
+	const configuredCoverageBases = (
+		env.PUBLIC_PANORAMAX_API_URLS ||
+		env.PUBLIC_PANORAMAX_API_URL ||
+		env.PUBLIC_PANORAMAX_VIEWER_URLS ||
+		env.PUBLIC_PANORAMAX_VIEWER_URL ||
+		'https://panoramax.ign.fr'
+	)
+		.split(',')
+		.map((url) => url.trim().replace(/\/$/, ''))
+		.filter(Boolean);
+
+	const coverageApiBase = (() => {
+		const base = configuredCoverageBases[0] || 'https://panoramax.ign.fr';
+		return base.endsWith('/api') ? base : `${base}/api`;
+	})();
 
 	onMount(() => {
 		(async () => {
@@ -25,6 +46,7 @@
 				previewMap = L.map(previewMapContainer).setView([20, 0], 2);
 				L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(previewMap);
 				drawnItems = L.featureGroup().addTo(previewMap);
+				coverageLayer = L.layerGroup().addTo(previewMap);
 
 				if (isAdmin) {
 					const drawControl = new L.Control.Draw({
@@ -72,9 +94,134 @@
 				if (game?.polygon) {
 					showPolygonOnMap(game.polygon);
 				}
+
+				scheduleCoverageRefresh();
+				previewMap.on('moveend zoomend', scheduleCoverageRefresh);
 			}
 		})();
 	});
+
+	onDestroy(() => {
+		isDestroyed = true;
+		if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
+		if (previewMap) {
+			previewMap.off('moveend zoomend', scheduleCoverageRefresh);
+		}
+	});
+
+	function scheduleCoverageRefresh() {
+		if (!previewMap || !coverageLayer) return;
+		if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
+		coverageRefreshTimer = setTimeout(() => {
+			refreshCoveragePoints();
+		}, 400);
+	}
+
+	function buildSampleBoxes(bounds: L.LatLngBounds): [number, number, number, number][] {
+		const west = Math.max(-180, bounds.getWest());
+		const east = Math.min(180, bounds.getEast());
+		const south = Math.max(-85, bounds.getSouth());
+		const north = Math.min(85, bounds.getNorth());
+
+		const spanLon = Math.max(0.1, east - west);
+		const spanLat = Math.max(0.1, north - south);
+		const targetSamples = 24;
+
+		const cols = Math.max(3, Math.min(8, Math.round(Math.sqrt((targetSamples * spanLon) / spanLat))));
+		const rows = Math.max(3, Math.min(8, Math.ceil(targetSamples / cols)));
+
+		const stepLon = spanLon / cols;
+		const stepLat = spanLat / rows;
+		const boxes: [number, number, number, number][] = [];
+
+		for (let col = 0; col < cols; col++) {
+			for (let row = 0; row < rows; row++) {
+				const minLon = west + col * stepLon;
+				const maxLon = Math.min(east, minLon + stepLon);
+				const minLat = south + row * stepLat;
+				const maxLat = Math.min(north, minLat + stepLat);
+				boxes.push([minLon, minLat, maxLon, maxLat]);
+			}
+		}
+
+		for (let i = boxes.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[boxes[i], boxes[j]] = [boxes[j], boxes[i]];
+		}
+
+		return boxes.slice(0, targetSamples);
+	}
+
+	async function fetchPointForBox(
+		box: [number, number, number, number]
+	): Promise<[number, number] | null> {
+		const params = new URLSearchParams({
+			bbox: box.join(','),
+			limit: '1'
+		});
+
+		const res = await fetch(`${coverageApiBase}/search?${params.toString()}`, {
+			headers: { Accept: 'application/geo+json' }
+		});
+		if (!res.ok) return null;
+		const json = await res.json();
+		const features = Array.isArray(json?.features) ? json.features : [];
+		if (!features.length) return null;
+
+		const coords = features[0]?.geometry?.coordinates;
+		if (!Array.isArray(coords) || coords.length !== 2) return null;
+		if (typeof coords[0] !== 'number' || typeof coords[1] !== 'number') return null;
+		return [coords[1], coords[0]];
+	}
+
+	async function refreshCoveragePoints() {
+		if (!previewMap || !coverageLayer || !L || isDestroyed) return;
+
+		const token = ++coverageRefreshToken;
+		const bounds = previewMap.getBounds();
+		const sampleBoxes = buildSampleBoxes(bounds);
+
+		const collected: [number, number][] = [];
+		const chunkSize = 6;
+
+		for (let i = 0; i < sampleBoxes.length; i += chunkSize) {
+			if (isDestroyed || token !== coverageRefreshToken) return;
+			const chunk = sampleBoxes.slice(i, i + chunkSize);
+			const chunkResults = await Promise.all(
+				chunk.map(async (box) => {
+					try {
+						return await fetchPointForBox(box);
+					} catch {
+						return null;
+					}
+				})
+			);
+
+			for (const point of chunkResults) {
+				if (point) collected.push(point);
+			}
+		}
+
+		if (isDestroyed || token !== coverageRefreshToken) return;
+
+		const unique = new Map<string, [number, number]>();
+		for (const [lat, lon] of collected) {
+			const key = `${lat.toFixed(3)}:${lon.toFixed(3)}`;
+			if (!unique.has(key)) unique.set(key, [lat, lon]);
+		}
+
+		coverageLayer.clearLayers();
+		for (const [lat, lon] of unique.values()) {
+			L.circleMarker([lat, lon], {
+				radius: 3,
+				color: 'hsl(var(--p))',
+				fillColor: 'hsl(var(--p))',
+				fillOpacity: 0.8,
+				weight: 0,
+				interactive: false
+			}).addTo(coverageLayer);
+		}
+	}
 
 	function showPolygonOnMap(polygon: any) {
 		drawnItems.clearLayers();
@@ -95,6 +242,7 @@
 		if (newPolygon) {
 			showPolygonOnMap(newPolygon);
 		}
+		scheduleCoverageRefresh();
 		onUpdate();
 	}
 

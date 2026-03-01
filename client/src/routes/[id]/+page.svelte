@@ -34,7 +34,7 @@
 	$: isAdmin = game.admin === currentPlayer?.id;
 	$: allPlayersReady = players.length > 0 && players.length === readyPlayers.length;
 	$: isCurrentPlayerReady = readyPlayers.some((p: any) => p.id === currentPlayer?.id);
-	$: imageId = game.challenge?.rounds[game.currentRound - 1];
+	$: roundImage = game.challenge?.rounds[game.currentRound - 1];
 	$: isFinalRound = game.currentRound >= game.maxRounds;
 
 	const SETTINGS_FIELDS = [
@@ -395,6 +395,21 @@
 	}
 
 	$: isGeneratingChallenge = !!(clientGenerating || game.is_generating_challenge);
+
+	function handleStartGameStateChange(active: boolean) {
+		clientGenerating = active;
+		if (active) {
+			console.info('[GamePage] startGame requested (optimistic overlay on)');
+			data.game = {
+				...data.game,
+				is_generating_challenge: true,
+				generation_found: Number(data.game.generation_found || 0),
+				generation_target: Number(data.game.generation_target || data.game.maxRounds || 0)
+			};
+		} else {
+			console.info('[GamePage] startGame request finished (optimistic overlay off)');
+		}
+	}
 </script>
 
 {#if !isPlayerInGame}
@@ -483,11 +498,12 @@
 			onUpdateSettings={updateGameSettings}
 			onUpdatePolygon={updatePolygonFromInput}
 			onKickPlayer={kickPlayer}
+			onStartGameStateChange={handleStartGameStateChange}
 		/>
 	{:else if game.status === 'playing' || game.status === 'summary'}
 		{#if view === 'guessing'}
 			<MakeGuess
-				{imageId}
+				imageId={roundImage}
 				username={currentPlayer?.username}
 				currentRound={game.currentRound}
 				totalRounds={game.maxRounds}

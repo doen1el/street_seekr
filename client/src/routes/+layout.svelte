@@ -11,11 +11,6 @@
 		rel="stylesheet"
 		href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
 	/>
-	<link
-		href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
-		rel="stylesheet"
-	/>
-	<script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
 	<link rel="icon" type="image/svg+xml" href="/favicon.ico" />
 	<title>StreetSeekr</title>
 </svelte:head>

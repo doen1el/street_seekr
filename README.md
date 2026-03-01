@@ -1,12 +1,12 @@
 <p align="center">
     <img src="docs/icon/icon.png" alt="App Icon" width="100" />
     <br>
-    v1.0.2
+    v1.1.0
 </p>
 
 # StreetSeekr
 
-StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.com/), based on the [Mapillary API](https://www.mapillary.com). It allows players to explore random street-level images from around the world and guess their locations on a map. The game supports multiple rounds and players, making it a fun and engaging experience. My initial motivation was heavily inspired by [Earthwalker](https://gitlab.com/glatteis/earthwalker).
+StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.com/), based on [Panoramax](https://panoramax.fr/). It allows players to explore random street-level images from around the world and guess their locations on a map. The game supports multiple rounds and players, making it a fun and engaging experience. My initial motivation was heavily inspired by [Earthwalker](https://gitlab.com/glatteis/earthwalker).
 
 ## 💪 Features
 
@@ -37,7 +37,7 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
 ### Prerequisites
 
 1. Docker and Docker Compose installed on your machine.
-2. A Mapillary account and an access token. You can sign up for a free account [here](https://www.mapillary.com/dashboard/developers) and generate an access token [here](www.mapillary.com/dashboard/developers).
+2. A Panoramax API endpoint and viewer URL (public instance).
 
 ### Steps
 
@@ -51,14 +51,22 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
    ```
 3. Edit the `docker-compose.yml` file to you're needs:
 
-   3.1: Set your Mapillary access token in the `MAPILLARY_ACCESS_TOKEN` environment variable under the `web` service:
+  3.1: Set your Panoramax API endpoint and viewer URL under the `web` service:
 
    ```yaml
    environment:
-     - MAPILLARY_ACCESS_TOKEN=your_mapillary_access_token
+     - PANORAMAX_API_URL=https://panoramax.ign.fr/api
+     - PUBLIC_PANORAMAX_VIEWER_URL=https://panoramax.ign.fr
    ```
 
-   3.2 (Optional) If you want to change the default ports, you can modify the `ports` section under the `web` and `pocketbase` services.
+   Optional token for private instances:
+
+   ```yaml
+   environment:
+     - PANORAMAX_API_TOKEN=your_bearer_token
+   ```
+
+  3.2 (Optional) If you want to change the default ports, you can modify the `ports` section under the `web` and `pocketbase` services.
 
    ```yaml
    pocketbase:
@@ -76,7 +84,7 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
        - 'PORT:3000'
    ```
 
-   3.3 (Optional) If you want to change the default domain, you can modify the `ORIGIN` environment variable under the `web` service.
+  3.3 (Optional) If you want to change the default domain, you can modify the `ORIGIN` environment variable under the `web` service.
 
    ```yaml
    environment:
@@ -103,7 +111,7 @@ You can of course open issues for bugs, feedback, and feature ideas. All suggest
 
 ## 📜 Credits
 
-- [Mapillary API](https://www.mapillary.com)
+- [Panoramax](https://panoramax.fr/)
 - [Earthwalker](https://gitlab.com/glatteis/earthwalker)
 - [Leaflet](https://github.com/Leaflet)
 - [Nominatim](https://nominatim.openstreetmap.org)

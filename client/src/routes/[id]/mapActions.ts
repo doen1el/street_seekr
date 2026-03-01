@@ -52,9 +52,8 @@ export async function handleUpdatePolygon(request: Request) {
 	}
 }
 
-//TODO: This function is some AI slop, but it works for now.
 /**
- * Generate up to `count` random Mapillary panorama image positions.
+ * Generate up to `count` random Panoramax image positions.
  *
  * Modes:
  * - Polygon provided:
@@ -66,137 +65,359 @@ export async function handleUpdatePolygon(request: Request) {
  *   2. For each point query increasing bbox sizes until a pano is found.
  *
  * Guarantees:
- * - Sends at most one Mapillary Images API request per attempted bbox.
+ * - Sends at most one Panoramax Search API request per attempted bbox.
  * - Tries to reach `count` results but may return fewer if coverage is sparse.
  *
  * @param polygon Optional Polygon / MultiPolygon (geojson feature) restricting search area.
  * @param count   Desired number of random panorama images.
- * @returns       Array of objects: { id, location: [lon, lat] }.
+ * @returns       Array of objects: { id, sequenceId, location: [lon, lat] }.
  */
 export async function generateRandomPointsForChallenge(
 	polygon: Feature<Polygon | MultiPolygon> | null,
 	count: number,
 	onProgress?: (found: number, target: number) => Promise<void> | void
-): Promise<Array<{ id: string; location: number[] }>> {
+): Promise<Array<{ id: string; sequenceId: string; location: number[]; viewerBaseUrl: string }>> {
 	console.log('[generateRandomPoints] start', { count, hasPolygon: !!polygon });
+	const generationStartedAt = Date.now();
+	const MAX_GENERATION_MS = Number(env.PANORAMAX_GENERATION_TIMEOUT_MS || 90000);
+	const FETCH_TIMEOUT_MS = Number(env.PANORAMAX_FETCH_TIMEOUT_MS || 8000);
+	const SEARCH_LIMIT = Number(env.PANORAMAX_SEARCH_LIMIT || 120);
 
-	const BASE_URL = 'https://graph.mapillary.com/images';
-	const MAPILLARY_ACCESS_TOKEN = env.MAPILLARY_ACCESS_TOKEN;
+	const PANORAMAX_API_URLS = (
+		env.PANORAMAX_API_URLS || env.PANORAMAX_API_URL || 'https://panoramax.ign.fr/api'
+	)
+		.split(',')
+		.map((url) => url.trim().replace(/\/$/, ''))
+		.filter(Boolean);
+	const PANORAMAX_VIEWER_URLS = (env.PUBLIC_PANORAMAX_VIEWER_URLS || env.PUBLIC_PANORAMAX_VIEWER_URL || '')
+		.split(',')
+		.map((url) => url.trim().replace(/\/$/, ''))
+		.filter(Boolean);
+	const PANORAMAX_API_TOKEN = env.PANORAMAX_API_TOKEN;
 
-	if (!MAPILLARY_ACCESS_TOKEN) {
-		console.warn('No Mapillary access token configured, cannot fetch images.');
+	if (!PANORAMAX_API_URLS.length) {
+		console.warn('No Panoramax API URLs configured, cannot fetch images.');
 		return [];
 	}
+
+	const sources = PANORAMAX_API_URLS.map((apiBaseUrl, index) => {
+		const explicitViewer = PANORAMAX_VIEWER_URLS[index];
+		const inferredViewer = apiBaseUrl.endsWith('/api') ? apiBaseUrl.slice(0, -4) : apiBaseUrl;
+		return {
+			apiBaseUrl,
+			viewerBaseUrl: explicitViewer || inferredViewer
+		};
+	});
 
 	const MAX_HALF_SIZE = 0.05;
 
 	const [minLon, minLat, maxLon, maxLat] = polygon ? turf.bbox(polygon) : [-180, -85, 180, 85];
 
-	const results: Array<{ id: string; location: number[] }> = [];
+	const results: Array<{ id: string; sequenceId: string; location: number[]; viewerBaseUrl: string }> = [];
 	const usedIds = new Set<string>();
+
+	function shuffledSources() {
+		const copy = [...sources];
+		for (let i = copy.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[copy[i], copy[j]] = [copy[j], copy[i]];
+		}
+		return copy;
+	}
 
 	function randomPointInBBox(): [number, number] {
 		return [Math.random() * (maxLon - minLon) + minLon, Math.random() * (maxLat - minLat) + minLat];
 	}
 
+	function shuffleInPlace<T>(array: T[]) {
+		for (let i = array.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[array[i], array[j]] = [array[j], array[i]];
+		}
+		return array;
+	}
+
+	function isValidCoords(item: any) {
+		const coords = item?.geometry?.coordinates;
+		return (
+			Array.isArray(coords) &&
+			coords.length === 2 &&
+			typeof coords[0] === 'number' &&
+			typeof coords[1] === 'number'
+		);
+	}
+
+	function isInsidePolygon(item: any) {
+		if (!polygon) return true;
+		if (!isValidCoords(item)) return false;
+		return turf.booleanPointInPolygon(turf.point(item.geometry.coordinates), polygon as any);
+	}
+
+	async function fetchJsonWithTimeout(url: string, headers: HeadersInit) {
+		const res = await fetchWithTimeout(url, { headers }, FETCH_TIMEOUT_MS);
+		if (!res.ok) {
+			const text = await res.text();
+			throw new Error(`Panoramax API ${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+		}
+		return await res.json();
+	}
+
+	function isGenerationTimedOut() {
+		return Date.now() - generationStartedAt > MAX_GENERATION_MS;
+	}
+
+	async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), timeoutMs);
+		try {
+			return await fetch(url, { ...options, signal: controller.signal });
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
+
 	async function fetchRandomImageFromBBox(
 		box: [number, number, number, number],
 		retries = 3
-	): Promise<{ id: string; location: number[] } | null> {
+	): Promise<{ id: string; sequenceId: string; location: number[]; viewerBaseUrl: string } | null> {
+		if (isGenerationTimedOut()) return null;
+
 		const params = new URLSearchParams({
-			access_token: MAPILLARY_ACCESS_TOKEN,
 			bbox: box.join(','),
-			fields: 'id,geometry',
-			limit: '50',
-			is_pano: 'true'
+			limit: String(SEARCH_LIMIT)
 		});
 
 		for (let attempt = 0; attempt <= retries; attempt++) {
-			try {
-				const url = `${BASE_URL}?${params.toString()}`;
-				const res = await fetch(url);
+			if (isGenerationTimedOut()) return null;
 
-				if (!res.ok) {
-					const errorText = await res.text();
-					let errorJson: any = null;
-					try {
-						errorJson = JSON.parse(errorText);
-					} catch {}
+			for (const source of shuffledSources()) {
+				if (isGenerationTimedOut()) return null;
 
-					const boxArea = (box[2] - box[0]) * (box[3] - box[1]);
-					console.warn('[fetchRandomImageFromBBox] API error', {
-						status: res.status,
-						statusText: res.statusText,
-						box,
-						boxArea: boxArea.toFixed(6),
-						attempt: attempt + 1,
-						maxRetries: retries + 1,
-						error: errorJson || errorText
+				try {
+					const url = `${source.apiBaseUrl}/search?${params.toString()}`;
+					const headers: HeadersInit = {
+						Accept: 'application/geo+json'
+					};
+					if (PANORAMAX_API_TOKEN) {
+						headers.Authorization = `Bearer ${PANORAMAX_API_TOKEN}`;
+					}
+
+					const json = await fetchJsonWithTimeout(url, headers);
+					let searchHits: any[] = Array.isArray(json?.features) ? json.features : [];
+
+					searchHits = searchHits.filter((item) => {
+						return isValidCoords(item) && isInsidePolygon(item) && !usedIds.has(String(item.id));
 					});
 
-					if (res.status === 400) {
-						return null;
+					if (!searchHits.length) {
+						continue;
 					}
 
-					if (res.status === 429) {
-						if (attempt < retries) {
-							await sleep(2000 * (attempt + 1));
-							continue;
-						}
-						return null;
-					}
+					shuffleInPlace(searchHits);
 
-					if (attempt < retries) {
+					const picked = searchHits[0];
+					const [lon, lat] = picked.geometry.coordinates;
+					const sequenceId =
+						typeof picked?.collection === 'string' && picked.collection.length > 0
+							? String(picked.collection)
+							: String(picked.id);
+					usedIds.add(String(picked.id));
+					return {
+						id: String(picked.id),
+						sequenceId,
+						location: [lon, lat],
+						viewerBaseUrl: source.viewerBaseUrl
+					};
+				} catch (err) {
+					const isNetworkError =
+						err instanceof Error &&
+						(err.message.includes('fetch failed') || err.message.includes('ECONNRESET'));
+
+					console.error('[fetchRandomImageFromBBox] exception', {
+						attempt: attempt + 1,
+						maxRetries: retries + 1,
+						isNetworkError,
+						apiBaseUrl: source.apiBaseUrl,
+						box,
+						error:
+							err instanceof Error
+								? {
+										name: err.name,
+										message: err.message,
+										cause: (err as any).cause
+								  }
+								: err
+					});
+
+					if (attempt < retries && isNetworkError) {
 						await sleep(500 * (attempt + 1));
 						continue;
 					}
-					return null;
 				}
-
-				const json = await res.json();
-				let imgs: any[] = json?.data || [];
-
-				if (polygon) {
-					imgs = imgs.filter((it) =>
-						turf.booleanPointInPolygon(turf.point(it.geometry.coordinates), polygon as any)
-					);
-				}
-
-				imgs = imgs.filter((it) => !usedIds.has(it.id));
-
-				if (!imgs.length) return null;
-
-				const picked = imgs[Math.floor(Math.random() * imgs.length)];
-				const [lon, lat] = picked.geometry.coordinates;
-				usedIds.add(picked.id);
-				return { id: picked.id, location: [lon, lat] };
-			} catch (err) {
-				const isNetworkError =
-					err instanceof Error &&
-					(err.message.includes('fetch failed') || err.message.includes('ECONNRESET'));
-
-				console.error('[fetchRandomImageFromBBox] exception', {
-					attempt: attempt + 1,
-					maxRetries: retries + 1,
-					isNetworkError,
-					box,
-					error:
-						err instanceof Error
-							? {
-									name: err.name,
-									message: err.message,
-									cause: (err as any).cause
-								}
-							: err
-				});
-
-				if (attempt < retries && isNetworkError) {
-					await sleep(500 * (attempt + 1));
-					continue;
-				}
-				return null;
 			}
 		}
+		return null;
+	}
+
+	async function fetchRawHitsFromBBox(
+		box: [number, number, number, number],
+		limit: number,
+		retries = 1
+	): Promise<Array<{ item: any; viewerBaseUrl: string }>> {
+		if (isGenerationTimedOut()) return [];
+
+		const params = new URLSearchParams({
+			bbox: box.join(','),
+			limit: String(Math.max(1, limit))
+		});
+
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			if (isGenerationTimedOut()) return [];
+
+			for (const source of shuffledSources()) {
+				if (isGenerationTimedOut()) return [];
+				try {
+					const url = `${source.apiBaseUrl}/search?${params.toString()}`;
+					const headers: HeadersInit = {
+						Accept: 'application/geo+json'
+					};
+					if (PANORAMAX_API_TOKEN) {
+						headers.Authorization = `Bearer ${PANORAMAX_API_TOKEN}`;
+					}
+
+					const json = await fetchJsonWithTimeout(url, headers);
+					const features: any[] = Array.isArray(json?.features) ? json.features : [];
+					if (!features.length) continue;
+
+					return features
+						.filter((item) => isValidCoords(item) && isInsidePolygon(item))
+						.map((item) => ({ item, viewerBaseUrl: source.viewerBaseUrl }));
+				} catch {
+					continue;
+				}
+			}
+		}
+
+		return [];
+	}
+
+	async function discoverCoverageBBoxes(
+		area: [number, number, number, number],
+		targetCount: number
+	): Promise<Array<[number, number, number, number]>> {
+		const [aMinLon, aMinLat, aMaxLon, aMaxLat] = area;
+		const spanLon = Math.max(0.01, aMaxLon - aMinLon);
+		const spanLat = Math.max(0.01, aMaxLat - aMinLat);
+
+		const lonStep = Math.max(0.5, Math.min(30, spanLon / 6));
+		const latStep = Math.max(0.5, Math.min(20, spanLat / 6));
+
+		const cells: Array<[number, number, number, number]> = [];
+		for (let lon = aMinLon; lon < aMaxLon; lon += lonStep) {
+			for (let lat = aMinLat; lat < aMaxLat; lat += latStep) {
+				cells.push([
+					Math.max(-180, lon),
+					Math.max(-85, lat),
+					Math.min(180, lon + lonStep),
+					Math.min(85, lat + latStep)
+				]);
+			}
+		}
+
+		shuffleInPlace(cells);
+
+		const maxProbes = Math.min(cells.length, Math.max(targetCount * 8, 24));
+		const discovered: Array<[number, number, number, number]> = [];
+
+		for (let i = 0; i < maxProbes; i++) {
+			if (isGenerationTimedOut()) break;
+			const cell = cells[i];
+			const rawHits = await fetchRawHitsFromBBox(cell, 1, 0);
+			if (rawHits.length > 0) {
+				discovered.push(cell);
+				if (discovered.length >= Math.max(targetCount * 2, 8)) {
+					break;
+				}
+			}
+		}
+
+		console.log('[generateRandomPoints] coverage discovery', {
+			area,
+			probes: maxProbes,
+			discovered: discovered.length
+		});
+
+		return discovered;
+	}
+
+	async function fetchRandomImageFromGlobalSearch(
+		bbox: [number, number, number, number],
+		retries = 2
+	): Promise<{ id: string; sequenceId: string; location: number[]; viewerBaseUrl: string } | null> {
+		if (isGenerationTimedOut()) return null;
+
+		const params = new URLSearchParams({
+			bbox: bbox.join(','),
+			limit: String(Math.max(SEARCH_LIMIT, 60))
+		});
+
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			if (isGenerationTimedOut()) return null;
+
+			for (const source of shuffledSources()) {
+				if (isGenerationTimedOut()) return null;
+
+				try {
+					const url = `${source.apiBaseUrl}/search?${params.toString()}`;
+					const headers: HeadersInit = {
+						Accept: 'application/geo+json'
+					};
+					if (PANORAMAX_API_TOKEN) {
+						headers.Authorization = `Bearer ${PANORAMAX_API_TOKEN}`;
+					}
+
+					const json = await fetchJsonWithTimeout(url, headers);
+					let searchHits: any[] = Array.isArray(json?.features) ? json.features : [];
+
+					searchHits = searchHits.filter((item) => {
+						return isValidCoords(item) && isInsidePolygon(item) && !usedIds.has(String(item.id));
+					});
+
+					if (!searchHits.length) continue;
+
+					shuffleInPlace(searchHits);
+					const picked = searchHits[0];
+					const [lon, lat] = picked.geometry.coordinates;
+					const sequenceId =
+						typeof picked?.collection === 'string' && picked.collection.length > 0
+							? String(picked.collection)
+							: String(picked.id);
+					usedIds.add(String(picked.id));
+
+					return {
+						id: String(picked.id),
+						sequenceId,
+						location: [lon, lat],
+						viewerBaseUrl: source.viewerBaseUrl
+					};
+				} catch (err) {
+					console.error('[fetchRandomImageFromGlobalSearch] exception', {
+						attempt: attempt + 1,
+						maxRetries: retries + 1,
+						apiBaseUrl: source.apiBaseUrl,
+						error:
+							err instanceof Error
+								? {
+										name: err.name,
+										message: err.message,
+										cause: (err as any).cause
+								  }
+								: err
+					});
+				}
+			}
+		}
+
 		return null;
 	}
 
@@ -207,11 +428,37 @@ export async function generateRandomPointsForChallenge(
 	/* ---------------- GLOBAL MODE ---------------- */
 	if (!polygon) {
 		const DELAY_MS = 200;
-		const maxAttempts = count * 100;
+		const maxAttempts = count * 180;
 		let attempts = 0;
-		const halfSizes = [0.01, 0.02, 0.03, 0.04, MAX_HALF_SIZE];
+		const halfSizes = [0.03, 0.06, 0.1, 0.18, 0.3, 0.5, 0.8];
+		const globalCoverage = await discoverCoverageBBoxes([-180, -85, 180, 85], count);
+
+		if (globalCoverage.length > 0) {
+			const coverageAttemptsMax = Math.max(count * 8, 16);
+			let coverageAttempts = 0;
+			while (
+				results.length < count &&
+				coverageAttempts < coverageAttemptsMax &&
+				!isGenerationTimedOut()
+			) {
+				coverageAttempts++;
+				const seed = globalCoverage[Math.floor(Math.random() * globalCoverage.length)];
+				const hit = await fetchRandomImageFromBBox(seed, 1);
+				if (!hit) continue;
+				results.push(hit);
+				if (onProgress) await onProgress(results.length, count);
+				console.log('[generateRandomPoints][global] coverage hit', {
+					collected: results.length,
+					target: count,
+					coverageAttempts
+				});
+				await sleep(DELAY_MS);
+			}
+		}
 
 		while (results.length < count && attempts < maxAttempts) {
+			if (isGenerationTimedOut()) break;
+
 			attempts++;
 			const [lon, lat] = randomPointInBBox();
 
@@ -251,21 +498,73 @@ export async function generateRandomPointsForChallenge(
 			got: results.length,
 			attempts
 		});
+
+		if (results.length < count && !isGenerationTimedOut()) {
+			console.log('[generateRandomPoints][global] fallback_search start', {
+				requested: count,
+				current: results.length
+			});
+
+			let fallbackAttempts = 0;
+			const fallbackMaxAttempts = Math.max(count * 3, 6);
+			while (
+				results.length < count &&
+				fallbackAttempts < fallbackMaxAttempts &&
+				!isGenerationTimedOut()
+			) {
+				fallbackAttempts++;
+				const hit = await fetchRandomImageFromGlobalSearch([-180, -85, 180, 85]);
+				if (!hit) break;
+				results.push(hit);
+				if (onProgress) await onProgress(results.length, count);
+			}
+
+			console.log('[generateRandomPoints][global] fallback_search end', {
+				requested: count,
+				got: results.length,
+				fallbackAttempts
+			});
+		}
 	} else {
 		/* ---------------- POLYGON MODE ---------------- */
+		const polygonCoverage = await discoverCoverageBBoxes([minLon, minLat, maxLon, maxLat], count);
+		if (polygonCoverage.length > 0) {
+			const coverageAttemptsMax = Math.max(count * 8, 12);
+			let coverageAttempts = 0;
+			while (
+				results.length < count &&
+				coverageAttempts < coverageAttemptsMax &&
+				!isGenerationTimedOut()
+			) {
+				coverageAttempts++;
+				const box = polygonCoverage[Math.floor(Math.random() * polygonCoverage.length)];
+				const hit = await fetchRandomImageFromBBox(box, 1);
+				if (!hit) continue;
+				results.push(hit);
+				if (onProgress) await onProgress(results.length, count);
+				console.log('[generateRandomPoints][poly] coverage hit', {
+					collected: results.length,
+					target: count,
+					coverageAttempts
+				});
+			}
+		}
+
 		const baseCandidateMultiplier = 6;
 		const maxPasses = 5;
 		const delayHit = 150;
 		const delayMiss = 20;
 
 		const halfSizeTiers: number[][] = [
-			[0.005, 0.01, 0.015, 0.02],
-			[0.025, 0.03, 0.035, 0.04],
-			[0.045, MAX_HALF_SIZE]
+			[0.006, 0.012, 0.02, 0.03],
+			[0.04, 0.06, 0.08, 0.1],
+			[0.12, 0.16, 0.22, 0.3]
 		];
 
 		let pass = 0;
 		while (results.length < count && pass < maxPasses) {
+			if (isGenerationTimedOut()) break;
+
 			const remaining = count - results.length;
 			const candidateTarget = Math.min(
 				2000,
@@ -317,6 +616,8 @@ export async function generateRandomPointsForChallenge(
 
 			const batchSize = 3;
 			for (let i = 0; i < centers.length; i += batchSize) {
+				if (isGenerationTimedOut()) break;
+
 				if (results.length >= count) break;
 
 				const batch = centers.slice(i, Math.min(i + batchSize, centers.length));
@@ -367,7 +668,8 @@ export async function generateRandomPointsForChallenge(
 			console.warn('[generateRandomPoints][poly] insufficient coverage', {
 				requested: count,
 				got: results.length,
-				passes: pass
+				passes: pass,
+				timedOut: isGenerationTimedOut()
 			});
 		}
 	}

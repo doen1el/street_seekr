@@ -19,6 +19,7 @@
     export let onUpdateSettings = () => {};
     export let onUpdatePolygon = (locationString: any) => Promise.resolve(null);
     export let onKickPlayer: (id: string) => void = () => {};
+    export let onStartGameStateChange: (active: boolean) => void = () => {};
 
     let showCopyFeedback = false;
 
@@ -71,6 +72,7 @@
                     {isAdmin}
                     {allPlayersReady}
                     {isCurrentPlayerReady}
+                    {onStartGameStateChange}
                 />
             </div>
         </div>

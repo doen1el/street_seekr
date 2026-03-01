@@ -1,0 +1,1 @@
+{"version":3,"file":"hooks-AZSDhxLA.js","sources":["../../../.svelte-kit/adapter-node/chunks/hooks.js"],"sourcesContent":["import { d as deLocalizeUrl } from \"./runtime.js\";\nconst reroute = (request) => deLocalizeUrl(request.url).pathname;\nexport {\n  reroute\n};\n"],"names":[],"mappings":";;AACK,MAAC,OAAO,GAAG,CAAC,OAAO,KAAK,aAAa,CAAC,OAAO,CAAC,GAAG,CAAC,CAAC;;;;"}

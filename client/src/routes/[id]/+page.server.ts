@@ -12,6 +12,15 @@ import {
 } from './mapActions';
 import { m } from '$lib/paraglide/messages.js';
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<T>((_, reject) =>
+			setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+		)
+	]);
+}
+
 const joinLobbySchema = z.object({
 	username: z.string().min(1, m.name_needs_at_least_1_character()).max(30)
 });
@@ -175,6 +184,15 @@ export const actions: Actions = {
 	startGame: async ({ locals, cookies, params }) => {
 		const playerId = cookies.get('player_id');
 		const game = await locals.pb.collection('games').getFirstListItem(`code="${params.id}"`);
+		console.info('[startGame] request', {
+			gameId: game.id,
+			gameCode: params.id,
+			playerId,
+			adminId: game.admin,
+			players: (game.players || []).length,
+			readyPlayers: (game.ready_players || []).length,
+			maxRounds: game.maxRounds
+		});
 
 		if (game.admin !== playerId) {
 			return fail(403, { message: 'Only an admin can start a game' });
@@ -189,16 +207,27 @@ export const actions: Actions = {
 				generation_found: 0,
 				generation_target: game.maxRounds
 			});
+			console.info('[startGame] generation started', { gameId: game.id, maxRounds: game.maxRounds });
 
-			const roundData = await generateRandomPointsForChallenge(
-				game.polygon,
-				game.maxRounds,
-				async (found) => {
+			const roundData = await withTimeout(
+				generateRandomPointsForChallenge(game.polygon, game.maxRounds, async (found) => {
 					await locals.pb.collection('games').update(game.id, {
 						generation_found: found
 					});
-				}
+					console.info('[startGame] generation progress', {
+						gameId: game.id,
+						found,
+						target: game.maxRounds
+					});
+				}),
+				120000,
+				'Challenge generation timed out.'
 			);
+			console.info('[startGame] generation finished', {
+				gameId: game.id,
+				requested: game.maxRounds,
+				got: roundData.length
+			});
 
 			if (roundData.length < game.maxRounds) {
 				await locals.pb.collection('games').update(game.id, {
@@ -206,7 +235,7 @@ export const actions: Actions = {
 					generation_found: 0
 				});
 				return fail(400, {
-					message: `Couldnt find enough imageId's (${roundData.length}/${game.maxRounds}) in the selection.`
+					message: `Could not find enough panoramas (${roundData.length}/${game.maxRounds}) in the selection.`
 				});
 			}
 
@@ -237,10 +266,13 @@ export const actions: Actions = {
 			return { success: true, message: 'Game is starting' };
 		} catch (err) {
 			await locals.pb.collection('games').update(game.id, {
-				is_generating_challenge: false
+				is_generating_challenge: false,
+				generation_found: 0
 			});
 			console.error('Error creating a challenge', err);
-			return fail(500, { message: 'Error creating a challenge' });
+			const message = err instanceof Error ? err.message : 'Error creating a challenge';
+			console.error('[startGame] failed', { gameId: game.id, message });
+			return fail(500, { message });
 		}
 	},
 

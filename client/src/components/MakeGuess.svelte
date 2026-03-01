@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+	import { env } from '$env/dynamic/public';
+	import '@panoramax/web-viewer/build/photoviewer.css';
 	import GuessMap from './GuessMap.svelte';
 	import { ChevronsRightLeft, Check } from 'lucide-svelte';
 	import { m } from '$lib/paraglide/messages.js';
 
-	export let imageId;
+	export let imageId: string | { id: string; sequenceId?: string; viewerBaseUrl?: string; apiBaseUrl?: string };
 	export let currentRound;
 	export let totalRounds;
 	export let roundDuration;
@@ -15,30 +17,50 @@
 		guess: [number, number] | null;
 	}>();
 
-	let mapillaryContainer: HTMLDivElement;
 	let guessMapComponent: GuessMap;
 	let mapSize: 'small' | 'large' = 'small';
 	let selectedLocation: [number, number] | null = null;
 	let guessMade = false;
 	let showGuessSpinner = false;
 	let guessSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
+	let viewerLoadFailed = false;
 	let timeLeft = remainingSeconds ?? roundDuration;
 	let timer: ReturnType<typeof setInterval>;
-	let viewer: any;
+
+	const configuredViewerBases = (
+		env.PUBLIC_PANORAMAX_VIEWER_URLS || env.PUBLIC_PANORAMAX_VIEWER_URL || 'https://panoramax.ign.fr'
+	)
+		.split(',')
+		.map((url) => url.trim().replace(/\/$/, ''))
+		.filter(Boolean);
+	const defaultViewerBase = configuredViewerBases[0] || 'https://panoramax.ign.fr';
+
+	$: pictureId = typeof imageId === 'string' ? imageId : imageId?.id;
+	$: sequenceId = typeof imageId === 'string' ? undefined : imageId?.sequenceId;
+	$: viewerBase = typeof imageId === 'string' ? defaultViewerBase : imageId?.viewerBaseUrl || defaultViewerBase;
+	$: viewerEndpoint = (() => {
+		const apiBase = typeof imageId === 'string' ? undefined : imageId?.apiBaseUrl;
+		if (apiBase) return apiBase.replace(/\/$/, '');
+		if (viewerBase.endsWith('/api')) return viewerBase;
+		return `${viewerBase}/api`;
+	})();
+	$: viewerSrc = (() => {
+		if (!pictureId) return `${viewerBase}/`;
+		const params = new URLSearchParams({
+			focus: 'pic',
+			nav: 'seq',
+			pic: pictureId
+		});
+		if (sequenceId) params.set('seq', sequenceId);
+		return `${viewerBase}/?${params.toString()}`;
+	})();
+	$: viewerRenderKey = `${viewerEndpoint}|${sequenceId || ''}|${pictureId || ''}|${currentRound}`;
 
 	onMount(() => {
-		const M = (window as any).mapillary;
-		const imageIdString = typeof imageId === 'string' ? imageId : imageId.id;
-		const options: any = {
-			accessToken: 'MLY|24624616097163218|ec5237dd86f3af21e29b932309d17828',
-			container: mapillaryContainer,
-			imageId: imageIdString,
-			component: { cover: false, bearing: false, attribution: false, zoom: false, keyboard: false },
-			cameraControls: M.CameraControls.Street,
-			combinedPanning: false,
-			renderMode: M.RenderMode.Letterbox
-		};
-		viewer = new M.Viewer(options);
+		import('@panoramax/web-viewer/build/photoviewer.js').catch((err) => {
+			console.error('[MakeGuess] Failed to load @panoramax/web-viewer, using iframe fallback', err);
+			viewerLoadFailed = true;
+		});
 
 		const prevHtmlOverflow = document.documentElement.style.overflow;
 		const prevBodyOverflow = document.body.style.overflow;
@@ -55,7 +77,6 @@
 		}, 1000);
 
 		return () => {
-			viewer.remove();
 			clearInterval(timer);
 			if (guessSpinnerTimer) clearTimeout(guessSpinnerTimer);
 
@@ -94,16 +115,32 @@
 	function toggleMapSize() {
 		mapSize = mapSize === 'small' ? 'large' : 'small';
 	}
-
-	function resizeViewer() {
-		viewer?.resize();
-	}
 </script>
 
-<svelte:window on:resize={resizeViewer} />
-
 <div class="fixed inset-0 mt-15 overflow-hidden" style="height: 100dvh; width: 100dvw;">
-	<div bind:this={mapillaryContainer} class="h-full w-full"></div>
+	{#if !viewerLoadFailed && pictureId}
+		{#key viewerRenderKey}
+			<pnx-photo-viewer
+				endpoint={viewerEndpoint}
+				picture={pictureId}
+				sequence={sequenceId}
+				nav={sequenceId ? 'seq' : 'none/pic'}
+				focus="pic"
+				widgets="false"
+				style="display:block; width:100%; height:100%;"
+			></pnx-photo-viewer>
+		{/key}
+	{:else}
+		<iframe
+			src={viewerSrc}
+			title="Panoramax Viewer"
+			class="h-full w-full border-0"
+			allow="fullscreen"
+			loading="eager"
+		></iframe>
+		<div class="pointer-events-none absolute inset-x-0 top-0 z-[5] h-[72px] bg-base-100"></div>
+		<div class="pointer-events-none absolute bottom-0 left-0 z-[5] h-[240px] w-[260px] bg-base-100"></div>
+	{/if}
 
 	<div
 		class="absolute top-4 left-4 z-10 flex items-center gap-4 rounded-lg bg-base-200/80 p-3 shadow-lg backdrop-blur-sm"

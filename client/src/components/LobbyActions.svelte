@@ -6,6 +6,7 @@
 	export let isAdmin: boolean;
 	export let allPlayersReady: boolean;
 	export let isCurrentPlayerReady: boolean;
+	export let onStartGameStateChange: (active: boolean) => void = () => {};
 
 	let starting = false;
 	let toggling = false;
@@ -17,6 +18,7 @@
 	let togglingSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
 	let showLeavingSpinner = false;
 	let leavingSpinnerTimer: ReturnType<typeof setTimeout> | null = null;
+	let startError = '';
 </script>
 
 <div class="card bg-base-100 shadow-xl">
@@ -28,14 +30,32 @@
 					method="POST"
 					action="?/startGame"
 					use:enhance={() => {
+						startError = '';
 						starting = true;
+						onStartGameStateChange(true);
+						console.info('[LobbyActions] startGame submit');
 						if (startingSpinnerTimer) clearTimeout(startingSpinnerTimer);
 						startingSpinnerTimer = setTimeout(() => (showStartingSpinner = true), 1000);
-						return async ({ update }) => {
+						return async ({ update, result }) => {
 							try {
 								await update();
+								console.info('[LobbyActions] startGame result', {
+									type: result.type,
+									status: (result as any)?.status,
+									data: (result as any)?.data
+								});
+								if (result.type === 'failure') {
+									const message = (result.data as any)?.message;
+									startError =
+										typeof message === 'string' && message.length > 0
+											? message
+											: 'Could not start game.';
+								} else if (result.type === 'error') {
+									startError = 'Could not start game.';
+								}
 							} finally {
 								starting = false;
+								onStartGameStateChange(false);
 								if (startingSpinnerTimer) clearTimeout(startingSpinnerTimer);
 								showStartingSpinner = false;
 							}
@@ -57,6 +77,9 @@
 						{/if}
 					</button>
 				</form>
+				{#if startError}
+					<p class="text-center text-xs text-error">{startError}</p>
+				{/if}
 				{#if !allPlayersReady}
 					<p class="text-center text-xs text-base-content/60">
 						{m.waint_until_all_players_are_ready()}
