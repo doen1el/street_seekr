@@ -64,7 +64,9 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
    pocketbase:
      ports:
        - 'PORT:8090'
-     command: ['serve', '--http=0.0.0.0:8090', '--auto-migrate']
+     volumes:
+       - pb_data:/pocketbase/pb_data
+       - ./database/pb_migrations:/pocketbase/pb_migrations
      healthcheck:
        test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health']
    web:
