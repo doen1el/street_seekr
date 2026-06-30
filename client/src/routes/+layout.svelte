@@ -7,10 +7,6 @@
 
 <svelte:head>
 	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-	<link
-		rel="stylesheet"
-		href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
-	/>
 	<link rel="icon" type="image/svg+xml" href="/favicon.ico" />
 	<title>StreetSeekr</title>
 </svelte:head>

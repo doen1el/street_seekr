@@ -1,7 +1,7 @@
 <p align="center">
     <img src="docs/icon/icon.png" alt="App Icon" width="100" />
     <br>
-    v1.1.0
+    v2.0.0
 </p>
 
 # StreetSeekr
@@ -66,20 +66,10 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
      - PANORAMAX_API_TOKEN=your_bearer_token
    ```
 
-  3.2 (Optional) If you want to change the default ports, you can modify the `ports` section under the `web` and `pocketbase` services.
+  3.2 (Optional) Stats and the leaderboard are stored in an embedded SQLite database (`node:sqlite`) — no separate database service is required. The file lives on the `db_data` volume (`STREETSEEKR_DB=/data/streetseekr.db`). To change the host port, edit the `web` service's `ports`:
 
    ```yaml
-   pocketbase:
-     ports:
-       - 'PORT:8090'
-     volumes:
-       - pb_data:/pocketbase/pb_data
-       - ./database/pb_migrations:/pocketbase/pb_migrations
-     healthcheck:
-       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8090/api/health']
    web:
-     environment:
-       - PUBLIC_POCKETBASE_URL=http://pocketbase:PORT
      ports:
        - 'PORT:3000'
    ```
@@ -97,7 +87,7 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
    ```
 5. Open your web browser and go to `http://localhost:5173` to access the application.
 
-6. (Optional) If you are using a reverse proxy like [Nginx Proxy Manager](https://nginxproxymanager.com/), you need to enable **WebSocket support** for the pocketbase instance and set the following headers:
+6. (Optional) If you are using a reverse proxy like [Nginx Proxy Manager](https://nginxproxymanager.com/), enable **WebSocket support** (the realtime game runs over a `/ws` endpoint) and, when serving from a different domain, set `STREETSEEKR_ALLOWED_ORIGINS` on the `web` service. Recommended headers:
    ```nginx
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
@@ -118,5 +108,6 @@ You can of course open issues for bugs, feedback, and feature ideas. All suggest
 - [Svelte](https://svelte.dev/)
 - [DaisyUI](https://daisyui.com/)
 - [Lucide](https://lucide.dev/)
-- [PocketBase](https://pocketbase.io/)
-- [DiceBeaer](https://www.dicebear.com/)
+- [SQLite](https://www.sqlite.org/)
+- [ws](https://github.com/websockets/ws)
+- [DiceBear](https://www.dicebear.com/)
