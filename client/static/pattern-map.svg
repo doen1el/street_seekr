@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <!-- Seamless scatter of "guess" map-pins (geo-guessing theme).
+       Pins stay fully inside the 300px tile so nothing is clipped at the seams. -->
+  <g fill="#047857" fill-opacity="0.11" fill-rule="evenodd">
+    <path transform="translate(40 60) scale(1.7)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+    <path transform="translate(205 150) scale(1.4)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+    <path transform="translate(150 30) scale(1.05)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+    <path transform="translate(95 205) scale(1.25)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+    <path transform="translate(240 232) scale(1.1)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+    <path transform="translate(28 168) scale(0.95)"
+      d="M12 2 C8.1 2 5 5.1 5 9 C5 14.25 12 22 12 22 C12 22 19 14.25 19 9 C19 5.1 15.9 2 12 2 Z M12 6.8 A2.2 2.2 0 1 0 12 11.2 A2.2 2.2 0 1 0 12 6.8 Z"/>
+  </g>
+</svg>

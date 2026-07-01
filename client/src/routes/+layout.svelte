@@ -11,7 +11,7 @@
 	<title>StreetSeekr</title>
 </svelte:head>
 
-<div class="flex min-h-screen flex-col bg-base-200">
+<div class="app-bg flex min-h-screen flex-col bg-base-200">
 	<AppBar />
 	<main class="flex flex-grow flex-col">
 		{@render children?.()}

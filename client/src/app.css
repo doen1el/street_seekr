@@ -3,3 +3,10 @@
    themes: emerald --default;
 };
 @plugin "@tailwindcss/typography";
+
+.app-bg {
+   background-image: url("/pattern-map.svg");
+   background-repeat: repeat;
+   background-size: 300px 300px;
+   background-attachment: fixed;
+}

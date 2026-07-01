@@ -1,14 +1,14 @@
-// DiceBear avatar styles offered to players.
 export const AVATAR_STYLES = [
-	'fun-emoji',
+	'miniavs',
 	'adventurer',
+	'open-peeps',
+	'notionists',
 	'bottts',
+	'fun-emoji',
 	'croodles',
 	'thumbs',
 	'micah',
-	'notionists',
 	'lorelei',
-	'open-peeps',
 	'pixel-art'
 ];
 

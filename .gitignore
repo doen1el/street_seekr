@@ -31,5 +31,5 @@ src/lib/paraglide
 # Svelte
 .svelte-kit
 
-# Pocketbase
-pb_data
+# SQL
+street_seekr.db-shm
