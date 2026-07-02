@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { game } from '$lib/ws.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 	import { resolvePolygon } from '$lib/geocode';
 	import { DEFAULT_AVATAR } from '../../../../server/avatars.js';
 	import {
@@ -25,18 +26,25 @@
 	const host = $derived(players.find((p) => p.isHost));
 	const allReady = $derived(players.length > 0 && players.every((p) => p.isHost || p.ready));
 
-	const numberFields: [keyof Settings, string][] = [
-		['maxRounds', 'Rounds'],
-		['timeLimit', 'Time (s)'],
-		['maxPoints', 'Max Points'],
-		['graceDistance', 'Tolerance (km)'],
-		['fallOfRate', 'Falloff (km)']
+	const numberFields: [keyof Settings, () => string][] = [
+		['maxRounds', m.rounds],
+		['timeLimit', m.time_s],
+		['maxPoints', m.maxPoints],
+		['graceDistance', m.tolerance_km],
+		['fallOfRate', m.falloff_km]
 	];
+
+	const tooltips: Partial<Record<keyof Settings, string>> = {
+		graceDistance: m.tolerance_tooltip(),
+		fallOfRate: m.falloff_tooltip()
+	};
 
 	const setNum = (field: string, value: string) => game.setSettings({ [field]: Number(value) });
 
 	const avatarStyle = (playerId?: string) =>
 		players.find((p) => p.id === playerId)?.avatar ?? DEFAULT_AVATAR;
+
+	let showLeaveConfirm = $state(false);
 
 	let copied = $state(false);
 	let copyTimer: ReturnType<typeof setTimeout>;
@@ -75,6 +83,8 @@
 		try {
 			const polygon = await resolvePolygon(names);
 			game.setSettings({ locationStrings: names, polygon });
+		} catch {
+			game.setSettings({ locationStrings: names, polygon: null });
 		} finally {
 			resolvingArea = false;
 		}
@@ -243,19 +253,19 @@
 </script>
 
 <div
-	class="mx-auto flex h-[calc(100dvh-4rem)] w-full flex-col gap-3 overflow-hidden p-4 lg:p-6 xl:w-2/3 xl:max-w-6xl"
+	class="mx-auto flex h-[calc(100dvh-4rem)] w-full flex-col gap-3 overflow-x-visible overflow-y-clip p-4 lg:p-6 xl:w-2/3 xl:max-w-6xl"
 >
 	<!-- Header: title left, copy-code button on the right over the chat -->
 	<header class="grid shrink-0 items-center gap-6 lg:grid-cols-[1fr_360px]">
-		<h1 class="truncate text-2xl font-bold sm:text-3xl">{host?.name ?? 'New'}'s Game</h1>
+		<h1 class="truncate text-2xl font-bold sm:text-3xl">{m.someones_game({ name: host?.name ?? 'New' })}</h1>
 		<div class="flex lg:justify-end">
 			<button
 				class="btn btn-ghost gap-2 font-mono text-base font-semibold tracking-widest"
 				onclick={copyCode}
-				title="Copy room code"
+				title={m.copy_room_code()}
 			>
 				{#if copied}
-					<Check class="size-4 text-success" /> Copied!
+					<Check class="size-4 text-success" /> {m.copied()}
 				{:else}
 					<Copy class="size-4 opacity-70" /> {room.code}
 				{/if}
@@ -269,34 +279,34 @@
 			<!-- Players -->
 			<div class="card shrink-0 bg-base-100 shadow-xl">
 				<div class="card-body gap-2 p-4">
-					<h2 class="text-lg font-bold">Players ({players.length})</h2>
+					<h2 class="text-lg font-bold">{m.players()} ({players.length})</h2>
 					<ul class="flex max-h-[20vh] flex-col gap-2 overflow-y-auto pr-1">
 						{#each players as p (p.id)}
-							<li class="flex items-center gap-3 rounded-lg bg-base-200 px-3 py-2">
+							<li
+								class="flex items-center gap-3 rounded-lg bg-base-200 px-3 py-2 transition-opacity"
+								class:opacity-40={!p.connected}
+							>
 								<Avatar name={p.name} style={p.avatar} size={36} />
-								<span class="font-semibold" class:opacity-50={!p.connected}>{p.name}</span>
+								<span class="font-semibold">{p.name}</span>
 								{#if p.isHost}
 									<span class="badge badge-success badge-sm gap-1">
-										<Crown class="size-3" /> Admin
+										<Crown class="size-3" /> {m.admin()}
 									</span>
-								{/if}
-								{#if !p.connected}
-									<span class="badge badge-ghost badge-sm">offline</span>
 								{/if}
 								<div class="ml-auto flex items-center gap-2">
 									{#if p.isHost || p.ready}
 										<span class="badge badge-info badge-sm gap-1 font-medium">
-											<Check class="size-3" /> Ready
+											<Check class="size-3" /> {m.ready()}
 										</span>
 									{:else}
 										<span class="badge badge-warning badge-sm gap-1 font-medium">
-											<Hourglass class="size-3" /> Waiting
+											<Hourglass class="size-3" /> {m.waiting()}
 										</span>
 									{/if}
 									{#if isHost && !p.isHost}
 										<button
 											class="btn btn-square btn-xs btn-error"
-											aria-label="Kick {p.name}"
+											aria-label={m.kick_player({ name: p.name })}
 											onclick={() => game.kick(p.id)}
 										>
 											<X class="size-3.5" />
@@ -309,15 +319,25 @@
 				</div>
 			</div>
 
-			<!-- Game settings -->
-			<div class="card min-h-0 flex-1 bg-base-100 shadow-xl">
+			<div class="card min-h-0 flex-1 overflow-visible bg-base-100 shadow-xl">
 				<div class="card-body flex min-h-0 flex-col gap-2 p-4">
-					<h2 class="text-lg font-bold">Game Settings</h2>
+					<h2 class="text-lg font-bold">{m.game_settings()}</h2>
 
 					<div class="grid shrink-0 grid-cols-2 gap-x-3 gap-y-1 md:grid-cols-3">
 						{#each numberFields as [field, label] (field)}
 							<label class="form-control">
-								<span class="label-text text-xs opacity-70">{label}</span>
+								<span class="label-text flex items-center gap-1 text-xs text-base-content/70">
+									{label()}
+									{#if tooltips[field]}
+										<span class="tooltip tooltip-bottom z-50" data-tip={tooltips[field]}>
+											<span
+												class="inline-grid size-3.5 cursor-help place-items-center rounded-full border border-base-content/30 text-[0.6rem] font-bold text-base-content/60"
+											>
+												?
+											</span>
+										</span>
+									{/if}
+								</span>
 								<input
 									class="input input-sm input-bordered w-full"
 									type="number"
@@ -329,24 +349,12 @@
 						{/each}
 					</div>
 
-					<div class="flex shrink-0 items-center gap-3">
-						<span class="text-sm opacity-70">Private Game</span>
-						<input
-							type="checkbox"
-							class="toggle toggle-sm toggle-success"
-							disabled={!isHost}
-							checked={room.settings.private}
-							onchange={(e) =>
-								game.setSettings({ private: (e.currentTarget as HTMLInputElement).checked })}
-						/>
-					</div>
-
 					<label class="form-control shrink-0">
-						<span class="label-text text-xs opacity-70">List of Areas</span>
+						<span class="label-text text-xs opacity-70">{m.list_of_areas()}</span>
 						<div class="relative">
 							<input
 								class="input input-sm input-bordered w-full pr-9"
-								placeholder="e.g. America, France"
+								placeholder={m.area_placeholder()}
 								disabled={!isHost}
 								bind:value={areaText}
 								onchange={applyArea}
@@ -358,7 +366,7 @@
 							{/if}
 						</div>
 						<span class="label-text-alt mt-0.5 text-[0.7rem] opacity-60">
-							Restrict to areas (comma-separated) or draw a polygon on the map.
+							{m.restrict_areas_hint()}
 						</span>
 					</label>
 
@@ -401,7 +409,7 @@
 							<div
 								class="absolute bottom-3 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-base-100/90 px-3 py-1 text-xs shadow"
 							>
-								Click the map to add points ({drawPts.length}) — need at least 3.
+								{m.draw_area_hint({ count: drawPts.length })}
 							</div>
 						{/if}
 					</div>
@@ -413,7 +421,7 @@
 		<div class="flex min-h-0 flex-col gap-4">
 			<div class="card min-h-0 flex-1 bg-base-100 shadow-xl">
 				<div class="card-body flex min-h-0 flex-col gap-3 p-4">
-					<h2 class="text-lg font-bold">Chat</h2>
+					<h2 class="text-lg font-bold">{m.chat()}</h2>
 					<div
 						bind:this={chatEl}
 						class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto rounded-lg bg-base-200 p-3"
@@ -430,18 +438,18 @@
 								<div class="chat-bubble" class:chat-bubble-success={mine}>{c.text}</div>
 							</div>
 						{:else}
-							<div class="m-auto text-sm opacity-50">No messages yet.</div>
+							<div class="m-auto text-sm opacity-50">{m.no_messages_yet2()}</div>
 						{/each}
 					</div>
 					<div class="join shrink-0">
 						<input
 							class="input join-item input-bordered input-sm w-full"
-							placeholder="Message…"
+							placeholder={m.message_placeholder()}
 							bind:value={chatText}
 							onkeydown={(e) => e.key === 'Enter' && sendChat()}
 						/>
-						<button class="btn join-item btn-primary btn-sm" onclick={sendChat} aria-label="Send">
-							<Send class="size-4" /> Send
+						<button class="btn join-item btn-primary btn-sm" onclick={sendChat} aria-label={m.send()}>
+							<Send class="size-4" /> {m.send()}
 						</button>
 					</div>
 				</div>
@@ -449,32 +457,55 @@
 
 			<div class="card shrink-0 bg-base-100 shadow-xl">
 				<div class="card-body gap-2 p-4">
-					<h2 class="text-lg font-bold">Actions</h2>
+					<h2 class="text-lg font-bold">{m.actions()}</h2>
 					{#if isHost}
 						<button
 							class="btn btn-block btn-primary"
 							disabled={!allReady}
 							onclick={() => game.start()}
 						>
-							<Play class="size-4" /> Start Game
+							<Play class="size-4" /> {m.start_game()}
 						</button>
 						{#if !allReady}
-							<p class="text-sm opacity-60">Wait until all players are ready.</p>
+							<p class="text-sm opacity-60">{m.waiting_all_ready()}</p>
 						{/if}
 					{:else}
 						<button
 							class="btn btn-block"
+							class:btn-secondary={!me?.ready}
 							class:btn-success={me?.ready}
 							onclick={() => game.setReady(!me?.ready)}
 						>
-							{me?.ready ? 'Ready ✓ — tap to unready' : "I'm ready"}
+							{me?.ready ? m.ready_tap_unready() : m.im_ready()}
 						</button>
 					{/if}
-					<button class="btn btn-outline btn-block btn-error" onclick={() => game.leave()}>
-						<LogOut class="size-4" /> Leave Game
+					<button
+						class="btn btn-outline btn-block btn-error"
+						onclick={() => (showLeaveConfirm = true)}
+					>
+						<LogOut class="size-4" /> {m.leave_game()}
 					</button>
 				</div>
 			</div>
 		</div>
 	</div>
 </div>
+
+{#if showLeaveConfirm}
+	<div class="fixed inset-0 z-[3000] grid place-items-center bg-black/40 p-4 backdrop-blur-sm">
+		<div class="card w-full max-w-sm bg-base-100 shadow-2xl">
+			<div class="card-body items-center gap-4 text-center">
+				<h3 class="text-lg font-bold">{m.leave_the_game_q()}</h3>
+				<p class="text-sm opacity-70">
+					{m.leave_confirm_desc()}
+				</p>
+				<div class="flex w-full gap-2">
+					<button class="btn flex-1" onclick={() => (showLeaveConfirm = false)}>{m.cancel()}</button>
+					<button class="btn flex-1 btn-error" onclick={() => game.leave()}>
+						<LogOut class="size-4" /> {m.leave()}
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}

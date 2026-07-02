@@ -4,6 +4,20 @@ import type { Feature, MultiPolygon, Position } from 'geojson';
 const NOMINATIM = (loc: string) =>
 	`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(loc)}&polygon_geojson=1&limit=1&format=json`;
 
+const MAX_POLYGON_BYTES = 1_000_000;
+
+function fitToLimit(feature: Feature<MultiPolygon>): Feature<MultiPolygon> {
+	if (JSON.stringify(feature).length <= MAX_POLYGON_BYTES) return feature;
+	for (const tolerance of [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]) {
+		try {
+			const simplified = turf.simplify(feature, { tolerance, highQuality: false, mutate: false });
+			if (JSON.stringify(simplified).length <= MAX_POLYGON_BYTES) return simplified;
+		} catch {
+		}
+	}
+	return feature;
+}
+
 export async function resolvePolygon(
 	locationStrings: string[]
 ): Promise<Feature<MultiPolygon> | null> {
@@ -26,5 +40,5 @@ export async function resolvePolygon(
 		else if (geojson.type === 'MultiPolygon') coordinates.push(...geojson.coordinates);
 	}
 
-	return coordinates.length ? turf.multiPolygon(coordinates) : null;
+	return coordinates.length ? fitToLimit(turf.multiPolygon(coordinates)) : null;
 }

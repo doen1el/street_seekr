@@ -52,6 +52,62 @@ function fakePanoramax(collections) {
 	};
 }
 
+/**
+ * Like `fakePanoramax` but also serves `/search?bbox=` (the federated fast path)
+ * and `/collections/{id}` metadata (with `stats:items.count`), so the min-items
+ * filter — which reads that count — can be exercised on the search path.
+ */
+function fakePanoramaxWithSearch(collections) {
+	return async (url) => {
+		const u = new URL(url);
+		const parts = u.pathname.split('/').filter(Boolean);
+		if (parts[1] === 'search') {
+			const bbox = (u.searchParams.get('bbox') ?? '').split(',').map(Number);
+			const features = [];
+			for (const c of collections) {
+				for (const it of c.items) {
+					if (it.lon >= bbox[0] && it.lon <= bbox[2] && it.lat >= bbox[1] && it.lat <= bbox[3]) {
+						features.push({
+							id: it.id,
+							collection: c.id,
+							geometry: { type: 'Point', coordinates: [it.lon, it.lat] },
+							properties: {}
+						});
+					}
+				}
+			}
+			return jsonRes({ features });
+		}
+		// collection metadata (no trailing /items) → item count
+		if (parts[1] === 'collections' && parts.length === 3) {
+			const c = collections.find((x) => x.id === decodeURIComponent(parts[2]));
+			if (!c) return jsonRes({ message: 'not found' }, 404);
+			return jsonRes({ id: c.id, 'stats:items': { count: c.items.length } });
+		}
+		if (parts[1] === 'collections' && parts[3] === 'items') {
+			const c = collections.find((x) => x.id === decodeURIComponent(parts[2]));
+			return jsonRes({
+				features: (c?.items ?? []).map((it) => ({
+					id: it.id,
+					collection: c.id,
+					geometry: { type: 'Point', coordinates: [it.lon, it.lat] },
+					properties: {}
+				}))
+			});
+		}
+		return jsonRes({ message: 'not found' }, 404);
+	};
+}
+
+/** @param {number} n @param {string} prefix @param {number} base */
+function seqItems(n, prefix, base) {
+	return Array.from({ length: n }, (_, i) => ({
+		id: `${prefix}-${i}`,
+		lon: base + i * 0.001,
+		lat: base + i * 0.001
+	}));
+}
+
 /** Deterministic LCG so selection is reproducible. */
 function lcg(seed) {
 	let s = seed >>> 0;
@@ -144,6 +200,47 @@ describe('generateRoundsForChallenge — polygon mode', () => {
 			only360: true
 		});
 		expect(rounds.map((r) => r.id)).toEqual(['sphere']);
+	});
+});
+
+describe('generateRoundsForChallenge — minSequenceItems', () => {
+	// c-long has 12 pictures (a real traversal), c-short has 3 (a stray upload).
+	const collections = [
+		{ id: 'c-long', bbox: [0.1, 0.1, 0.5, 0.5], items: seqItems(12, 'long', 0.15) },
+		{ id: 'c-short', bbox: [0.6, 0.6, 0.9, 0.9], items: seqItems(3, 'short', 0.62) }
+	];
+
+	it('search path: only draws from sequences with >= minSequenceItems pictures', async () => {
+		const rounds = await generateRoundsForChallenge(UNIT_SQUARE, 5, {
+			sources: [SOURCE],
+			fetcher: fakePanoramaxWithSearch(collections),
+			rng: lcg(42),
+			minSequenceItems: 10
+		});
+		expect(rounds.length).toBeGreaterThan(0);
+		expect(rounds.every((r) => r.collectionId === 'c-long')).toBe(true);
+		expect(rounds.some((r) => r.id.startsWith('short'))).toBe(false);
+	});
+
+	it('search path: without a minimum, the short sequence is eligible', async () => {
+		const rounds = await generateRoundsForChallenge(UNIT_SQUARE, 15, {
+			sources: [SOURCE],
+			fetcher: fakePanoramaxWithSearch(collections),
+			rng: lcg(42)
+		});
+		expect(rounds.some((r) => r.collectionId === 'c-short')).toBe(true);
+	});
+
+	it('drain (fallback) path: filters short sequences via itemCount', async () => {
+		// fakePanoramax has no /search, so generation falls back to sequence draining.
+		const rounds = await generateRoundsForChallenge(UNIT_SQUARE, 8, {
+			sources: [SOURCE],
+			fetcher: fakePanoramax(collections),
+			rng: lcg(7),
+			minSequenceItems: 10
+		});
+		expect(rounds.length).toBeGreaterThan(0);
+		expect(rounds.every((r) => r.collectionId === 'c-long')).toBe(true);
 	});
 });
 

@@ -7,6 +7,8 @@ export const ClientMsg = /** @type {const} */ ({
 	READY: 'ready',
 	START: 'start',
 	GUESS: 'guess',
+	LOADED: 'loaded',
+	FINISH: 'finish',
 	NEXT: 'next',
 	SAY: 'say',
 	KICK: 'kick',
@@ -21,6 +23,7 @@ export const ServerMsg = /** @type {const} */ ({
 	ROOM_STATE: 'room_state',
 	GENERATION_PROGRESS: 'generation_progress',
 	ROUND_START: 'round_start',
+	ROUND_TIMER: 'round_timer',
 	ROUND_END: 'round_end',
 	GAME_OVER: 'game_over',
 	GUESS_RESULT: 'guess_result',
@@ -65,6 +68,7 @@ export const ServerMsg = /** @type {const} */ ({
  * @property {number} totalPoints
  * @property {number} lastRoundPoints
  * @property {boolean} hasGuessed
+ * @property {boolean} finished
  */
 
 /**

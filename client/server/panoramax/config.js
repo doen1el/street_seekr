@@ -17,8 +17,11 @@ function csv(value) {
 
 /** Builds the configured Panoramax sources from the environment. @returns {PanoramaxSource[]} */
 export function getSourcesFromEnv() {
+	// Default to the federated central instance: it searches across ALL public
+	// Panoramax instances (real worldwide coverage + faster spatial index) instead of
+	// just IGN's France-centric one. Override with PANORAMAX_API_URLS if needed.
 	const apiUrls = csv(
-		process.env.PANORAMAX_API_URLS || process.env.PANORAMAX_API_URL || 'https://panoramax.ign.fr/api'
+		process.env.PANORAMAX_API_URLS || process.env.PANORAMAX_API_URL || 'https://api.panoramax.xyz/api'
 	);
 	const viewerUrls = csv(
 		process.env.PUBLIC_PANORAMAX_VIEWER_URLS || process.env.PUBLIC_PANORAMAX_VIEWER_URL
@@ -52,6 +55,9 @@ export async function generateRandomPointsForChallenge(polygon, count, onProgres
 		onProgress,
 		generationTimeoutMs: Number(process.env.PANORAMAX_GENERATION_TIMEOUT_MS || 60000),
 		fetchTimeoutMs: Number(process.env.PANORAMAX_FETCH_TIMEOUT_MS || 8000),
+		// Only draw from sequences with at least this many pictures — short sequences
+		// tend to be one-off uploads that make nondescript rounds.
+		minSequenceItems: Number(process.env.PANORAMAX_MIN_SEQUENCE_ITEMS || 10),
 		only360: process.env.PANORAMAX_ONLY_360 === 'true'
 	});
 }

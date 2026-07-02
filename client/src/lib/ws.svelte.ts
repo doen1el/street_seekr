@@ -161,6 +161,12 @@ class GameSocket {
 	guess(location: [number, number]) {
 		this.#send({ type: ClientMsg.GUESS, location });
 	}
+	loaded() {
+		this.#send({ type: ClientMsg.LOADED });
+	}
+	finish() {
+		this.#send({ type: ClientMsg.FINISH });
+	}
 	next() {
 		this.#send({ type: ClientMsg.NEXT });
 	}

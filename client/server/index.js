@@ -6,6 +6,8 @@ import {
 	setReady,
 	startGame,
 	handleGuess,
+	handleLoaded,
+	handleFinish,
 	handleNext,
 	kickPlayer,
 	notifyPlayerLeft,
@@ -123,6 +125,7 @@ function handleConnection(ws) {
 				if (!profile) return send({ type: ServerMsg.ERROR, message: 'Invalid profile' });
 				if (roomManager.rooms.size >= MAX_ROOMS)
 					return send({ type: ServerMsg.ERROR, message: 'Server is at capacity, try again later.' });
+				if (session) leaveCurrent(true);
 				const room = roomManager.createRoom({ solo: !!msg.solo });
 				const player = roomManager.addPlayer(room, profile, ws);
 				session = { room, playerId: player.id };
@@ -190,6 +193,18 @@ function handleConnection(ws) {
 				if (limited('guess')) break;
 				const a = active();
 				if (a) handleGuess(a.room, a.player, msg.location);
+				break;
+			}
+
+			case ClientMsg.LOADED: {
+				const a = active();
+				if (a) handleLoaded(a.room, a.player);
+				break;
+			}
+
+			case ClientMsg.FINISH: {
+				const a = active();
+				if (a) handleFinish(a.room, a.player);
 				break;
 			}
 

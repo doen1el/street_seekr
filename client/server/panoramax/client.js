@@ -130,6 +130,23 @@ export async function fetchItems(source, collectionId, opts = {}) {
 }
 
 /**
+ * Fetches just the picture count of one sequence (STAC `stats:items.count`).
+ * Cheap metadata request — used to skip trivially short sequences (a handful of
+ * pictures usually means a one-off upload, not a real street traversal).
+ * @param {PanoramaxSource} source @param {string} collectionId
+ * @param {{ fetcher?: Fetcher, timeoutMs?: number }} [opts]
+ * @returns {Promise<number>}
+ */
+export async function fetchCollectionItemCount(source, collectionId, opts = {}) {
+	const fetcher = opts.fetcher ?? fetch;
+	const timeoutMs = opts.timeoutMs ?? 8000;
+	const url = `${source.apiBaseUrl}/collections/${encodeURIComponent(collectionId)}`;
+	const json = await getJson(url, 'application/json', source, fetcher, timeoutMs);
+	const count = Number(json?.['stats:items']?.count);
+	return Number.isFinite(count) ? count : 0;
+}
+
+/**
  * Searches pictures inside a bbox directly (fallback to the collections path).
  * @param {PanoramaxSource} source @param {[number, number, number, number]} bbox
  * @param {{ limit?: number, fetcher?: Fetcher, timeoutMs?: number }} [opts]

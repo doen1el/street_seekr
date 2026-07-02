@@ -21,6 +21,7 @@ export interface PublicPlayer {
 	isHost: boolean;
 	connected: boolean;
 	ready: boolean;
+	finished: boolean;
 	totalPoints: number;
 	lastRoundPoints: number;
 	hasGuessed: boolean;
@@ -48,6 +49,7 @@ export interface Pano {
 export interface RoundInfo {
 	round: number;
 	maxRounds: number;
+	roundStartsAt: number;
 	roundEndsAt: number;
 	serverNow: number;
 	timeLimit: number;
@@ -75,6 +77,12 @@ export interface GameOver {
 	winnerName: string | null;
 	isTie: boolean;
 	players: PublicPlayer[];
+	lastRound: RoundResult | null;
+}
+
+export interface RoundHistoryEntry {
+	round: number;
+	points: Record<string, number>;
 }
 
 export interface ChatEntry {
@@ -108,6 +116,8 @@ export interface ClientState {
 	round: RoundInfo | null;
 	roundResult: RoundResult | null;
 	gameOver: GameOver | null;
+	roundHistory: RoundHistoryEntry[];
+	roundResults: RoundResult[];
 	chat: ChatEntry[];
 	guessAccepted: boolean;
 	roomCheck: { code: string; exists: boolean } | null;
@@ -124,6 +134,8 @@ export function initialState(): ClientState {
 		round: null,
 		roundResult: null,
 		gameOver: null,
+		roundHistory: [],
+		roundResults: [],
 		chat: [],
 		guessAccepted: false,
 		roomCheck: null,
@@ -141,6 +153,8 @@ function clearedGame(): Partial<ClientState> {
 		round: null,
 		roundResult: null,
 		gameOver: null,
+		roundHistory: [],
+		roundResults: [],
 		chat: [],
 		guessAccepted: false
 	};
@@ -177,7 +191,6 @@ export function applyServerMessage(
 				next.round = null;
 				next.roundResult = null;
 				next.generation = null;
-				next.gameOver = null;
 				next.guessAccepted = false;
 			} else if (room?.status === 'playing') {
 				next.gameOver = null;
@@ -197,9 +210,12 @@ export function applyServerMessage(
 				roundResult: null,
 				gameOver: null,
 				guessAccepted: false,
+				roundHistory: msg.round === 1 ? [] : state.roundHistory,
+				roundResults: msg.round === 1 ? [] : state.roundResults,
 				round: {
 					round: msg.round,
 					maxRounds: msg.maxRounds,
+					roundStartsAt: msg.roundStartsAt ?? now,
 					roundEndsAt: msg.roundEndsAt,
 					serverNow: msg.serverNow ?? now,
 					timeLimit: msg.timeLimit,
@@ -207,27 +223,48 @@ export function applyServerMessage(
 				}
 			};
 
-		case ServerMsg.ROUND_END:
-			return {
-				...state,
-				roundResult: {
-					round: msg.round,
-					location: msg.location,
-					pano: msg.pano,
-					guesses: msg.guesses ?? [],
-					players: msg.players ?? [],
-					nextInMs: msg.nextInMs ?? 0,
-					nextRoundAt: now + (msg.nextInMs ?? 0),
-					isLast: !!msg.isLast
-				}
+		case ServerMsg.ROUND_TIMER:
+			return state.round && state.round.round === msg.round
+				? { ...state, round: { ...state.round, roundEndsAt: msg.roundEndsAt } }
+				: state;
+
+		case ServerMsg.ROUND_END: {
+			const roundPlayers: PublicPlayer[] = msg.players ?? [];
+			const entry: RoundHistoryEntry = {
+				round: msg.round,
+				points: Object.fromEntries(roundPlayers.map((p) => [p.id, p.lastRoundPoints]))
 			};
+			const roundHistory = [...state.roundHistory.filter((h) => h.round !== msg.round), entry].sort(
+				(a, b) => a.round - b.round
+			);
+			const roundResult: RoundResult = {
+				round: msg.round,
+				location: msg.location,
+				pano: msg.pano,
+				guesses: msg.guesses ?? [],
+				players: roundPlayers,
+				nextInMs: msg.nextInMs ?? 0,
+				nextRoundAt: now + (msg.nextInMs ?? 0),
+				isLast: !!msg.isLast
+			};
+			const roundResults = [
+				...state.roundResults.filter((r) => r.round !== msg.round),
+				roundResult
+			].sort((a, b) => a.round - b.round);
+			return { ...state, roundHistory, roundResults, roundResult };
+		}
 
 		case ServerMsg.GAME_OVER:
 			return {
 				...state,
 				round: null,
 				roundResult: null,
-				gameOver: { winnerName: msg.winnerName ?? null, isTie: !!msg.isTie, players: msg.players ?? [] }
+				gameOver: {
+					winnerName: msg.winnerName ?? null,
+					isTie: !!msg.isTie,
+					players: msg.players ?? [],
+					lastRound: state.roundResult
+				}
 			};
 
 		case ServerMsg.GUESS_RESULT:

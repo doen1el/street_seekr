@@ -23,31 +23,31 @@ function run(msgs: any[], now = 1000): ClientState {
 
 describe('applyServerMessage', () => {
 	it('CREATED sets playerId and clears any prior game', () => {
-		const start = { ...initialState(), gameOver: { winnerName: 'x', isTie: false, players: [] } };
+		const start = { ...initialState(), gameOver: { winnerName: 'x', isTie: false, players: [], lastRound: null } };
 		const s = applyServerMessage(start, { type: ServerMsg.CREATED, playerId: 'p1', code: 'ABCD' });
 		expect(s.playerId).toBe('p1');
 		expect(s.gameOver).toBeNull();
 		expect(s.error).toBeNull();
 	});
 
-	it('ROOM_STATE lobby clears round/result/generation/gameOver', () => {
+	it('ROOM_STATE lobby clears round/result/generation but keeps gameOver', () => {
 		const start: ClientState = {
 			...initialState(),
 			round: { round: 1 } as any,
 			roundResult: { round: 1 } as any,
 			generation: { found: 1, target: 2 },
-			gameOver: { winnerName: 'x', isTie: false, players: [] }
+			gameOver: { winnerName: 'x', isTie: false, players: [], lastRound: null }
 		};
 		const s = applyServerMessage(start, { type: ServerMsg.ROOM_STATE, room: room({ status: 'lobby' }) });
 		expect(s.room?.code).toBe('ABCD');
 		expect(s.round).toBeNull();
 		expect(s.roundResult).toBeNull();
 		expect(s.generation).toBeNull();
-		expect(s.gameOver).toBeNull();
+		expect(s.gameOver).not.toBeNull();
 	});
 
 	it('ROOM_STATE playing clears only gameOver', () => {
-		const start = { ...initialState(), gameOver: { winnerName: 'x', isTie: false, players: [] } };
+		const start = { ...initialState(), gameOver: { winnerName: 'x', isTie: false, players: [], lastRound: null } };
 		const s = applyServerMessage(start, { type: ServerMsg.ROOM_STATE, room: room({ status: 'playing' }) });
 		expect(s.gameOver).toBeNull();
 		expect(s.room?.status).toBe('playing');

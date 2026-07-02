@@ -1,6 +1,11 @@
 import { ServerMsg } from './protocol.js';
 import { roomManager } from './rooms.js';
-import { SETTINGS_BOUNDS, ROUND_SUMMARY_PAUSE_MS } from './config.js';
+import {
+	SETTINGS_BOUNDS,
+	ROUND_SUMMARY_PAUSE_MS,
+	GET_READY_MS,
+	ROUND_LOAD_GRACE_MS
+} from './config.js';
 import { recordGameResult } from './db.js';
 import { generateRandomPointsForChallenge } from './panoramax/index.js';
 
@@ -66,13 +71,13 @@ function sanitizeSettings(raw, current) {
 }
 
 /**
- * Host changes lobby settings; changing them clears readiness.
+ * Host changes lobby settings. Readiness is intentionally kept (changing settings
+ * used to un-ready everyone, which was annoying).
  * @param {Room} room @param {Player} player @param {any} settings
  */
 export function updateSettings(room, player, settings) {
 	if (room.hostId !== player.id || room.status !== 'lobby') return;
 	Object.assign(room.settings, sanitizeSettings(settings, room.settings));
-	for (const p of room.players.values()) if (p.id !== room.hostId) p.ready = false;
 	roomManager.broadcastState(room);
 }
 
@@ -155,7 +160,10 @@ export async function startGame(room, player) {
 		room.generation = null;
 		send(player, {
 			type: ServerMsg.ERROR,
-			message: `Could not find enough panoramas (${rounds.length}/${target}) in this area.`,
+			message:
+				rounds.length === 0
+					? 'No Street View coverage in this area. Try a different area or play worldwide.'
+					: `Only found ${rounds.length}/${target} spots here. Try a bigger/different area or play worldwide.`,
 			code: 'insufficient_coverage'
 		});
 		roomManager.broadcastState(room);
@@ -175,15 +183,23 @@ function startRound(room, n) {
 
 	room.currentRound = n;
 	room.status = 'playing';
-	room.roundEndsAt = Date.now() + room.settings.timeLimit * 1000;
+
+	const startsAt = Date.now() + GET_READY_MS;
+	room.roundStartsAt = startsAt;
+	room.roundEndsAt = startsAt + room.settings.timeLimit * 1000;
+	room.roundTimerStarted = false;
 	room.guesses.set(n, new Map());
-	for (const p of room.players.values()) p.lastRoundPoints = 0;
+	for (const p of room.players.values()) {
+		p.lastRoundPoints = 0;
+		p.finished = false;
+	}
 
 	const r = room.challenge.rounds[n - 1];
 	roomManager.broadcast(room, {
 		type: ServerMsg.ROUND_START,
 		round: n,
 		maxRounds: room.settings.maxRounds,
+		roundStartsAt: startsAt,
 		roundEndsAt: room.roundEndsAt,
 		serverNow: Date.now(),
 		timeLimit: room.settings.timeLimit,
@@ -192,7 +208,32 @@ function startRound(room, n) {
 	roomManager.broadcastState(room);
 	console.log(`[game] ${room.code} round ${n}/${room.settings.maxRounds} @ ${r.location}`);
 
-	room.roundTimer = setTimeout(() => endRound(room), room.settings.timeLimit * 1000);
+	room.roundTimer = setTimeout(
+		() => endRound(room),
+		GET_READY_MS + ROUND_LOAD_GRACE_MS + room.settings.timeLimit * 1000
+	);
+}
+
+/**
+ * A client reports its panorama has loaded. The first such report starts the actual
+ * guess clock (timeLimit from now, clamped into the get-ready→grace window) so nobody
+ * loses time to a cold load. @param {Room} room @param {Player} _player
+ */
+export function handleLoaded(room, _player) {
+	if (room.status !== 'playing' || room.roundTimerStarted) return;
+	room.roundTimerStarted = true;
+	const startAt = Math.min(
+		Math.max(Date.now(), room.roundStartsAt),
+		room.roundStartsAt + ROUND_LOAD_GRACE_MS
+	);
+	room.roundEndsAt = startAt + room.settings.timeLimit * 1000;
+	if (room.roundTimer) clearTimeout(room.roundTimer);
+	room.roundTimer = setTimeout(() => endRound(room), Math.max(0, room.roundEndsAt - Date.now()));
+	roomManager.broadcast(room, {
+		type: ServerMsg.ROUND_TIMER,
+		round: room.currentRound,
+		roundEndsAt: room.roundEndsAt
+	});
 }
 
 /**
@@ -203,7 +244,7 @@ export function handleGuess(room, player, location) {
 	if (room.status !== 'playing' || !room.challenge) return;
 	if (Date.now() > room.roundEndsAt) return;
 	const roundGuesses = room.guesses.get(room.currentRound);
-	if (!roundGuesses || roundGuesses.has(player.id)) return;
+	if (!roundGuesses) return;
 	const anchor = room.challenge.rounds[room.currentRound - 1];
 	if (!anchor) return;
 
@@ -217,8 +258,18 @@ export function handleGuess(room, player, location) {
 	roundGuesses.set(player.id, { location: loc, points });
 	send(player, { type: ServerMsg.GUESS_RESULT, accepted: true });
 	roomManager.broadcastState(room);
+}
 
-	if (allGuessed(room)) endRound(room);
+/**
+ * A player marks themselves finished with the round. When every connected player is
+ * finished, the round ends early. @param {Room} room @param {Player} player
+ */
+export function handleFinish(room, player) {
+	if (room.status !== 'playing') return;
+	player.finished = true;
+	roomManager.broadcastState(room);
+	const connected = [...room.players.values()].filter((p) => p.connected);
+	if (connected.length > 0 && connected.every((p) => p.finished)) endRound(room);
 }
 
 /** @param {Room} room */
@@ -257,18 +308,15 @@ function endRound(room) {
 	console.log(`[game] ${room.code} round ${n} ended (answer ${anchor.location})`);
 
 	if (!isAlive(room)) return cleanupRoom(room);
-	room.pauseTimer = setTimeout(() => {
-		if (!isAlive(room)) return cleanupRoom(room);
-		if (isLast) endGame(room);
-		else startRound(room, n + 1);
-	}, ROUND_SUMMARY_PAUSE_MS);
 }
 
-/** Host skips the summary pause and advances immediately. @param {Room} room @param {Player} player */
+/** Host advances from the round summary to the next round (or the final results). @param {Room} room @param {Player} player */
 export function handleNext(room, player) {
-	if (room.hostId !== player.id || room.status !== 'summary' || !room.pauseTimer) return;
-	clearTimeout(room.pauseTimer);
-	room.pauseTimer = null;
+	if (room.hostId !== player.id || room.status !== 'summary') return;
+	if (room.pauseTimer) {
+		clearTimeout(room.pauseTimer);
+		room.pauseTimer = null;
+	}
 	const n = room.currentRound;
 	if (n >= room.settings.maxRounds) endGame(room);
 	else startRound(room, n + 1);
@@ -336,6 +384,7 @@ export function syncJoiner(room, player) {
 				type: ServerMsg.ROUND_START,
 				round: n,
 				maxRounds: room.settings.maxRounds,
+				roundStartsAt: room.roundStartsAt,
 				roundEndsAt: room.roundEndsAt,
 				serverNow: Date.now(),
 				timeLimit: room.settings.timeLimit,
@@ -365,10 +414,8 @@ export function syncJoiner(room, player) {
 	}
 }
 
-/** A player left mid-round: end the round early if everyone left has guessed. @param {Room} room */
-export function notifyPlayerLeft(room) {
-	if (room.status === 'playing' && allGuessed(room)) endRound(room);
-}
+/** A player left mid-round. Rounds now always run for their full time, so nothing to do. @param {Room} _room */
+export function notifyPlayerLeft(_room) {}
 
 /** Clears any pending timers for a room. @param {Room} room */
 export function cleanupRoom(room) {
@@ -376,14 +423,6 @@ export function cleanupRoom(room) {
 }
 
 /* helpers */
-
-/** Every connected player has submitted a guess for the current round. @param {Room} room */
-function allGuessed(room) {
-	const roundGuesses = room.guesses.get(room.currentRound);
-	if (!roundGuesses) return false;
-	const connected = [...room.players.values()].filter((p) => p.connected);
-	return connected.length > 0 && connected.every((p) => roundGuesses.has(p.id));
-}
 
 /** @param {any} location @returns {[number, number] | null} `[lng, lat]` */
 function normalizeGuess(location) {

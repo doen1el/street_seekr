@@ -19,6 +19,7 @@ let playerSeq = 0;
  * @property {string} id
  * @property {Profile} profile
  * @property {boolean} ready
+ * @property {boolean} finished
  * @property {number} totalPoints
  * @property {number} lastRoundPoints
  * @property {boolean} connected
@@ -39,7 +40,9 @@ let playerSeq = 0;
  * @property {{ found: number, target: number } | null} generation
  * @property {{ rounds: any[] } | null} challenge
  * @property {number} currentRound
+ * @property {number} roundStartsAt
  * @property {number} roundEndsAt
+ * @property {boolean} roundTimerStarted
  * @property {Map<number, Map<string, { location: number[] | null, points: number }>>} guesses
  * @property {ReturnType<typeof setTimeout> | null} roundTimer
  * @property {ReturnType<typeof setTimeout> | null} pauseTimer
@@ -81,7 +84,9 @@ export class RoomManager {
 			generation: null,
 			challenge: null,
 			currentRound: 0,
+			roundStartsAt: 0,
 			roundEndsAt: 0,
+			roundTimerStarted: false,
 			guesses: new Map(),
 			roundTimer: null,
 			pauseTimer: null
@@ -128,6 +133,7 @@ export class RoomManager {
 			id,
 			profile,
 			ready: false,
+			finished: false,
 			totalPoints: 0,
 			lastRoundPoints: 0,
 			connected: true,
@@ -183,6 +189,7 @@ export class RoomManager {
 				isHost: p.id === room.hostId,
 				connected: p.connected,
 				ready: p.id === room.hostId || p.ready,
+				finished: p.finished,
 				totalPoints: p.totalPoints,
 				lastRoundPoints: p.lastRoundPoints,
 				hasGuessed: roundGuesses?.has(p.id) ?? false

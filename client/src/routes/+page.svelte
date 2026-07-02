@@ -1,16 +1,34 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Check } from 'lucide-svelte';
-	import { game } from '$lib/ws.svelte';
+	import { LogIn, X } from 'lucide-svelte';
+	import { game, getLastRoom } from '$lib/ws.svelte';
 	import { profile } from '$lib/profile.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 	import Avatar from '$lib/components/play/Avatar.svelte';
-	import Leaderboard from '$lib/components/play/Leaderboard.svelte';
 	import SoloModal from '$lib/components/play/SoloModal.svelte';
 
 	let name = $state(profile.name);
 	let code = $state((page.url.searchParams.get('join') ?? '').toUpperCase());
 	let busy = $state(false);
+
+	let lastRoom = $state<string | null>(null);
+	onMount(() => (lastRoom = getLastRoom()));
+
+	async function rejoin() {
+		if (!lastRoom || busy) return;
+		busy = true;
+		game.dismissError();
+		if (name.trim()) profile.set(name.trim());
+		try {
+			await game.join(lastRoom, profile.value);
+			await goto(`/${lastRoom}`);
+		} catch {
+			lastRoom = null;
+			busy = false;
+		}
+	}
 
 	const canPlay = $derived(name.trim().length > 0);
 	const trimmedCode = $derived(code.trim().toUpperCase());
@@ -57,6 +75,26 @@
 </script>
 
 <div class="flex h-[calc(100dvh-4rem)] flex-col items-center justify-center gap-4 overflow-hidden p-4">
+	{#if lastRoom}
+		<div
+			class="flex w-full max-w-md items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2 shadow"
+		>
+			<span class="flex-1 text-sm">
+				{m.rejoin_your_game()} <span class="font-mono font-bold tracking-wider">{lastRoom}</span>
+			</span>
+			<button class="btn btn-sm btn-primary" disabled={busy} onclick={rejoin}>
+				<LogIn class="size-4" /> {m.rejoin()}
+			</button>
+			<button
+				class="btn btn-circle btn-ghost btn-sm"
+				aria-label={m.dismiss()}
+				onclick={() => (lastRoom = null)}
+			>
+				<X class="size-4" />
+			</button>
+		</div>
+	{/if}
+
 	<div class="card w-full max-w-md bg-base-100 shadow-xl">
 		<div class="card-body gap-4">
 			<div class="flex items-center gap-3">
@@ -64,45 +102,41 @@
 					type="button"
 					class="shrink-0 rounded-full ring-2 ring-base-300 ring-offset-2 ring-offset-base-100 transition hover:ring-primary"
 					onclick={() => profile.nextAvatar()}
-					title="Change avatar"
-					aria-label="Change avatar"
+					title={m.change_avatar()}
+					aria-label={m.change_avatar()}
 				>
 					<Avatar name={name || 'you'} style={profile.avatar} size={56} />
 				</button>
 				<input
 					class="input input-bordered input-lg w-full"
 					maxlength="20"
-					placeholder="Pick a name"
+					placeholder={m.pick_a_name()}
 					bind:value={name}
 				/>
 			</div>
 
 			<button class="btn btn-primary btn-lg" disabled={!canPlay || busy} onclick={create}>
-				Create a room
+				{m.create_a_room()}
 			</button>
 
-			<div class="divider my-0 text-xs">or join</div>
+			<div class="divider my-0 text-xs">{m.or_join()}</div>
 
 			<div>
 				<div class="join w-full">
 					<input
 						class="input input-lg join-item input-bordered w-full uppercase"
 						class:input-error={roomMissing}
+						class:input-success={roomExists}
 						maxlength="4"
-						placeholder="ROOM CODE"
+						placeholder={m.room_code()}
 						bind:value={code}
 						oninput={(e) => (code = (e.currentTarget as HTMLInputElement).value.toUpperCase())}
 					/>
-					<button class="btn btn-lg join-item btn-secondary" disabled={!canJoin} onclick={join}>Join</button>
+					<button class="btn btn-lg join-item btn-secondary" disabled={!canJoin} onclick={join}>{m.join()}</button>
 				</div>
-				{#if roomExists}
-					<p class="mt-1 flex items-center gap-1 text-xs text-success">
-						<Check class="size-3.5" /> Room found
-					</p>
-				{/if}
 			</div>
 
-			<div class="divider my-0 text-xs">or</div>
+			<div class="divider my-0 text-xs">{m.or_word()}</div>
 
 			<SoloModal {name} disabled={!canPlay} />
 
@@ -111,6 +145,4 @@
 			{/if}
 		</div>
 	</div>
-
-	<Leaderboard />
 </div>

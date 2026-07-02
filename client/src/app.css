@@ -10,3 +10,7 @@
    background-size: 300px 300px;
    background-attachment: fixed;
 }
+
+.leaflet-container {
+   background: #aad3df;
+}

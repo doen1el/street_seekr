@@ -6,11 +6,15 @@ export const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
 export const ROUND_SUMMARY_PAUSE_MS = 12000;
 
+export const GET_READY_MS = 3000;
+
+export const ROUND_LOAD_GRACE_MS = 12000;
+
 export const DEFAULT_SETTINGS = Object.freeze({
 	maxRounds: 5,
 	timeLimit: 60,
 	graceDistance: 0.5,
-	fallOfRate: 2,
+	fallOfRate: 1000,
 	maxPoints: 1000,
 	density: 1,
 	private: false,
@@ -22,7 +26,7 @@ export const SETTINGS_BOUNDS = Object.freeze({
 	maxRounds: { min: 1, max: 15 },
 	timeLimit: { min: 10, max: 600 },
 	graceDistance: { min: 0, max: 50 },
-	fallOfRate: { min: 0.1, max: 500 },
+	fallOfRate: { min: 0.1, max: 10000 },
 	maxPoints: { min: 100, max: 10000 },
 	density: { min: 1, max: 5 }
 });
