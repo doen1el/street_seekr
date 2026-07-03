@@ -1,7 +1,7 @@
 <p align="center">
     <img src="docs/icon/icon.png" alt="App Icon" width="100" />
     <br>
-    v2.0.0
+    v3.0.0
 </p>
 
 # StreetSeekr
