@@ -65,7 +65,6 @@
 	});
 
 	const room = $derived(game.state.room);
-	const gen = $derived(room?.generation ?? game.state.generation);
 
 	let warmed = false;
 	$effect(() => {
@@ -97,12 +96,7 @@
 			<div class="flex flex-col items-center gap-4 text-white">
 				<span class="loading loading-spinner loading-lg"></span>
 				<h2 class="text-2xl font-bold">{m.creating_game()}</h2>
-				<progress
-					class="progress h-2 w-64 progress-success"
-					value={gen?.found ?? 0}
-					max={gen?.target ?? room.maxRounds}
-				></progress>
-				<p class="font-mono text-sm opacity-90">{gen?.found ?? 0}/{gen?.target ?? room.maxRounds}</p>
+				<progress class="progress h-2 w-64 progress-success"></progress>
 			</div>
 		</div>
 	</div>

@@ -19,16 +19,12 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
 
 <table>
     <tr>
-        <td><img src="docs/feature_graphics/1.png" width="100%"></td>
-        <td><img src="docs/feature_graphics/2.png" width="100%"></td>
+        <td><img src="docs/feature_graphics/homepage.png" width="100%"></td>
+        <td><img src="docs/feature_graphics/lobby.png" width="100%"></td>
     </tr>
     <tr>
-        <td><img src="docs/feature_graphics/3.png" width="100%"></td>
-        <td><img src="docs/feature_graphics/4.png" width="100%"></td>
-    </tr>
-    <tr>
-        <td><img src="docs/feature_graphics/5.png" width="100%"></td>
-        <td><img src="docs/feature_graphics/6.png" width="100%"></td>
+        <td><img src="docs/feature_graphics/game.png" width="100%"></td>
+        <td><img src="docs/feature_graphics/end_round.png" width="100%"></td>
     </tr>
 </table>
 
@@ -37,7 +33,7 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
 ### Prerequisites
 
 1. Docker and Docker Compose installed on your machine.
-2. A Panoramax API endpoint and viewer URL (public instance).
+2. (Optional) A Panoramax API endpoint and viewer URL — by default the federated central instance (`https://api.panoramax.xyz`) is used, so no instance of your own is required.
 
 ### Steps
 
@@ -51,12 +47,24 @@ StreetSeekr is an open-source alternative to [GeoGuessr](https://www.geoguessr.c
    ```
 3. Edit the `docker-compose.yml` file to you're needs:
 
-  3.1: Set your Panoramax API endpoint and viewer URL under the `web` service:
+  3.1: Set your Panoramax API endpoint and viewer URL under the `web` service.
+
+   By default StreetSeekr uses the **federated central instance**, which searches across _all_ public Panoramax instances for real worldwide coverage — so you don't need to change anything:
 
    ```yaml
    environment:
-     - PANORAMAX_API_URL=https://panoramax.ign.fr/api
-     - PUBLIC_PANORAMAX_VIEWER_URL=https://panoramax.ign.fr
+     - PANORAMAX_API_URL=https://api.panoramax.xyz/api
+     - PUBLIC_PANORAMAX_VIEWER_URL=https://api.panoramax.xyz
+   ```
+
+   To pin a single instance instead (e.g. France-only), point these at it, for example `https://panoramax.ign.fr/api` / `https://panoramax.ign.fr`.
+
+   To query several instances at once, use the CSV plural variables (matched by position):
+
+   ```yaml
+   environment:
+     - PANORAMAX_API_URLS=https://api.panoramax.xyz/api,https://panoramax.ign.fr/api
+     - PUBLIC_PANORAMAX_VIEWER_URLS=https://api.panoramax.xyz,https://panoramax.ign.fr
    ```
 
    Optional token for private instances:

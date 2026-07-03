@@ -7,8 +7,8 @@ services:
     restart: unless-stopped
     environment:
       ORIGIN: http://localhost:5173 # change this to your domain in production
-      PANORAMAX_API_URL: https://panoramax.ign.fr/api
-      PUBLIC_PANORAMAX_VIEWER_URL: https://panoramax.ign.fr
+      PANORAMAX_API_URL: https://api.panoramax.xyz/api
+      PUBLIC_PANORAMAX_VIEWER_URL: https://api.panoramax.xyz
       STREETSEEKR_DB: /data/streetseekr.db
       # Behind a reverse proxy on another domain, list it so the WebSocket
       # accepts cross-origin upgrades, e.g.:
